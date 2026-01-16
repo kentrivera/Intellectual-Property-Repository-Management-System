@@ -6,56 +6,197 @@
 
 class Folder {
     private $db;
+    private static $folderColumns = null;
+    private $lastError = null;
 
     public function __construct() {
         $this->db = Database::getInstance();
     }
 
-    public function create($data) {
-        $sql = 'INSERT INTO folders (name, parent_id, created_by, description, color) VALUES (?, ?, ?, ?, ?)';
-        $params = [
-            $data['name'],
-            $data['parent_id'] ?? null,
-            $data['created_by'],
-            $data['description'] ?? null,
-            $data['color'] ?? '#6B7280'
-        ];
-        
+    private function getFolderColumns() {
+        if (self::$folderColumns !== null) {
+            return self::$folderColumns;
+        }
+
         try {
-            return $this->db->insert($sql, $params);
-        } catch(Exception $e) {
-            error_log("Folder creation error: " . $e->getMessage());
-            return false;
+            $cols = $this->db->fetchAll('SHOW COLUMNS FROM folders', []);
+            $names = [];
+            foreach ($cols as $c) {
+                if (!empty($c['Field'])) {
+                    $names[$c['Field']] = true;
+                }
+            }
+            self::$folderColumns = $names;
+            return self::$folderColumns;
+        } catch (Exception $e) {
+            // If introspection fails, fall back to the minimal known schema.
+            self::$folderColumns = [
+                'name' => true,
+                'parent_id' => true,
+                'created_by' => true,
+                'is_archived' => true,
+                'created_at' => true,
+                'updated_at' => true
+            ];
+            return self::$folderColumns;
         }
     }
 
+    private function folderColumnExists($name) {
+        $cols = $this->getFolderColumns();
+        return isset($cols[$name]);
+    }
+
+    public function create($data) {
+        $this->lastError = null;
+        $name = trim((string)($data['name'] ?? ''));
+        if ($name === '') {
+            $this->lastError = 'Folder name is required';
+            return false;
+        }
+
+        $parentId = $data['parent_id'] ?? null;
+        $createdBy = $data['created_by'] ?? null;
+        if (!$createdBy) {
+            $this->lastError = 'Missing created_by';
+            return false;
+        }
+
+        $columns = [];
+        $placeholders = [];
+        $params = [];
+
+        // Always-supported (base schema)
+        $columns[] = 'name';
+        $placeholders[] = '?';
+        $params[] = $name;
+
+        if ($this->folderColumnExists('parent_id')) {
+            $columns[] = 'parent_id';
+            $placeholders[] = '?';
+            $params[] = $parentId ?: null;
+        }
+
+        $columns[] = 'created_by';
+        $placeholders[] = '?';
+        $params[] = (int)$createdBy;
+
+        // Optional enhanced columns
+        if ($this->folderColumnExists('description')) {
+            $columns[] = 'description';
+            $placeholders[] = '?';
+            $params[] = $data['description'] ?? null;
+        }
+
+        if ($this->folderColumnExists('color')) {
+            $columns[] = 'color';
+            $placeholders[] = '?';
+            $params[] = $data['color'] ?? '#6B7280';
+        }
+
+        if ($this->folderColumnExists('is_system_folder')) {
+            $columns[] = 'is_system_folder';
+            $placeholders[] = '?';
+            $params[] = (int)($data['is_system_folder'] ?? 0);
+        }
+
+        // Compute path + level if schema supports it
+        $parentPath = null;
+        $parentLevel = 0;
+        if ($parentId) {
+            $metaCols = [];
+            if ($this->folderColumnExists('path')) $metaCols[] = 'path';
+            if ($this->folderColumnExists('level')) $metaCols[] = 'level';
+
+            if (!empty($metaCols)) {
+                $sqlMeta = 'SELECT ' . implode(', ', $metaCols) . ' FROM folders WHERE id = ? LIMIT 1';
+                $parent = $this->db->fetch($sqlMeta, [(int)$parentId]);
+                if ($parent) {
+                    if (isset($parent['path'])) $parentPath = $parent['path'];
+                    if (isset($parent['level'])) $parentLevel = (int)$parent['level'];
+                }
+            }
+        }
+
+        if ($this->folderColumnExists('level')) {
+            $columns[] = 'level';
+            $placeholders[] = '?';
+            $params[] = $parentId ? ($parentLevel + 1) : 0;
+        }
+
+        if ($this->folderColumnExists('path')) {
+            $safeName = str_replace(['\r', '\n'], '', $name);
+            $base = $parentPath ? rtrim((string)$parentPath, '/') : '';
+            $computed = ($base === '' ? '' : $base) . '/' . $safeName;
+            if ($computed === '/') $computed = '/';
+
+            $columns[] = 'path';
+            $placeholders[] = '?';
+            $params[] = $computed;
+        }
+
+        $sql = 'INSERT INTO folders (' . implode(', ', $columns) . ') VALUES (' . implode(', ', $placeholders) . ')';
+
+        try {
+            return $this->db->insert($sql, $params);
+        } catch (Exception $e) {
+            $this->lastError = $e->getMessage();
+            error_log('Folder creation error: ' . $e->getMessage());
+
+            // Last-resort fallback: minimal insert (older schemas)
+            try {
+                return $this->db->insert(
+                    'INSERT INTO folders (name, parent_id, created_by) VALUES (?, ?, ?)',
+                    [$name, $parentId ?: null, (int)$createdBy]
+                );
+            } catch (Exception $e2) {
+                $this->lastError = $e2->getMessage();
+                error_log('Folder creation fallback error: ' . $e2->getMessage());
+                return false;
+            }
+        }
+    }
+
+    public function getLastError() {
+        return $this->lastError;
+    }
+
     public function findById($id) {
+        return $this->findByIdWithArchived($id, false);
+    }
+
+    public function findByIdWithArchived($id, $includeArchived = false) {
+        $where = $includeArchived ? 'WHERE f.id = ?' : 'WHERE f.id = ? AND f.is_archived = 0';
         $sql = 'SELECT f.*, u.full_name as created_by_name 
                 FROM folders f 
                 LEFT JOIN users u ON f.created_by = u.id 
-                WHERE f.id = ? AND f.is_archived = 0 
+                ' . $where . ' 
                 LIMIT 1';
         return $this->db->fetch($sql, [$id]);
     }
 
-    public function getSubFolders($parentId = null) {
+    public function getSubFolders($parentId = null, $includeArchived = false) {
+        $archivedClause = $includeArchived ? '' : ' AND f.is_archived = 0';
+
         if ($parentId) {
             $sql = 'SELECT f.*, u.full_name as created_by_name,
                     (SELECT COUNT(*) FROM document_files df WHERE df.folder_id = f.id AND df.is_deleted = 0) as file_count
+                    ,(SELECT COUNT(*) FROM folders sf WHERE sf.parent_id = f.id AND sf.is_archived = 0) as subfolder_count
                     FROM folders f 
                     LEFT JOIN users u ON f.created_by = u.id
-                    WHERE f.parent_id = ? AND f.is_archived = 0 
+                    WHERE f.parent_id = ?' . $archivedClause . ' 
                     ORDER BY f.is_system_folder DESC, f.name ASC';
             return $this->db->fetchAll($sql, [$parentId]);
-        } else {
-            $sql = 'SELECT f.*, u.full_name as created_by_name,
-                    (SELECT COUNT(*) FROM document_files df WHERE df.folder_id = f.id AND df.is_deleted = 0) as file_count
-                    FROM folders f 
-                    LEFT JOIN users u ON f.created_by = u.id
-                    WHERE f.parent_id IS NULL AND f.is_archived = 0 
-                    ORDER BY f.is_system_folder DESC, f.name ASC';
-            return $this->db->fetchAll($sql, []);
         }
+
+        $sql = 'SELECT f.*, u.full_name as created_by_name,
+                (SELECT COUNT(*) FROM document_files df WHERE df.folder_id = f.id AND df.is_deleted = 0) as file_count
+                ,(SELECT COUNT(*) FROM folders sf WHERE sf.parent_id = f.id AND sf.is_archived = 0) as subfolder_count
+                FROM folders f 
+                LEFT JOIN users u ON f.created_by = u.id
+                WHERE f.parent_id IS NULL' . $archivedClause . ' 
+                ORDER BY f.is_system_folder DESC, f.name ASC';
+        return $this->db->fetchAll($sql, []);
     }
 
     public function getAllFolders($includeArchived = false) {
@@ -71,6 +212,53 @@ class Folder {
     }
 
     public function update($id, $data) {
+        // If the schema supports path/level, keep them consistent on rename/move.
+        $shouldUpdatePath = ($this->folderColumnExists('path') || $this->folderColumnExists('level'))
+            && (array_key_exists('name', $data) || array_key_exists('parent_id', $data));
+
+        $oldPath = null;
+        if ($shouldUpdatePath && $this->folderColumnExists('path')) {
+            $existing = $this->db->fetch('SELECT path FROM folders WHERE id = ? LIMIT 1', [$id]);
+            $oldPath = $existing['path'] ?? null;
+        }
+
+        if ($shouldUpdatePath) {
+            // Determine target parent id / name
+            $current = $this->db->fetch('SELECT name, parent_id FROM folders WHERE id = ? LIMIT 1', [$id]);
+            if ($current) {
+                $newName = array_key_exists('name', $data) ? (string)$data['name'] : (string)$current['name'];
+                $newParentId = array_key_exists('parent_id', $data) ? $data['parent_id'] : $current['parent_id'];
+
+                $parentPath = '';
+                $parentLevel = 0;
+                if (!empty($newParentId)) {
+                    $metaCols = [];
+                    if ($this->folderColumnExists('path')) $metaCols[] = 'path';
+                    if ($this->folderColumnExists('level')) $metaCols[] = 'level';
+
+                    if (!empty($metaCols)) {
+                        $parent = $this->db->fetch(
+                            'SELECT ' . implode(', ', $metaCols) . ' FROM folders WHERE id = ? LIMIT 1',
+                            [(int)$newParentId]
+                        );
+                        if ($parent) {
+                            if (isset($parent['path'])) $parentPath = (string)$parent['path'];
+                            if (isset($parent['level'])) $parentLevel = (int)$parent['level'];
+                        }
+                    }
+                }
+
+                if ($this->folderColumnExists('level')) {
+                    $data['level'] = !empty($newParentId) ? ($parentLevel + 1) : 0;
+                }
+
+                if ($this->folderColumnExists('path')) {
+                    $base = $parentPath ? rtrim($parentPath, '/') : '';
+                    $data['path'] = ($base === '' ? '' : $base) . '/' . $newName;
+                }
+            }
+        }
+
         $fields = [];
         $params = [];
         
@@ -84,7 +272,21 @@ class Folder {
         $sql = "UPDATE folders SET $fieldsStr WHERE id = ?";
         
         try {
-            return $this->db->execute($sql, $params) > 0;
+            $ok = $this->db->execute($sql, $params) > 0;
+
+            // If path changed, update descendants (mimics the previous trigger behavior).
+            if ($ok && $shouldUpdatePath && $this->folderColumnExists('path') && $oldPath) {
+                $new = $this->db->fetch('SELECT path FROM folders WHERE id = ? LIMIT 1', [$id]);
+                $newPath = $new['path'] ?? null;
+                if ($newPath && $newPath !== $oldPath) {
+                    $this->db->execute(
+                        'UPDATE folders SET path = REPLACE(path, ?, ?) WHERE path LIKE CONCAT(?, "%") AND id != ?',
+                        [$oldPath, $newPath, $oldPath, $id]
+                    );
+                }
+            }
+
+            return $ok;
         } catch(Exception $e) {
             error_log("Folder update error: " . $e->getMessage());
             return false;
@@ -93,35 +295,117 @@ class Folder {
 
     public function delete($id) {
         // Soft delete (archive)
-        $sql = 'UPDATE folders SET is_archived = 1, archived_at = NOW() WHERE id = ?';
-        try {
-            return $this->db->execute($sql, [$id]) > 0;
-        } catch(Exception $e) {
-            error_log("Folder delete error: " . $e->getMessage());
-            return false;
-        }
+        return $this->archive($id, null);
     }
 
     /**
      * Archive a folder
      */
     public function archive($id, $archivedBy = null) {
-        $sql = 'UPDATE folders SET is_archived = 1, archived_at = NOW()';
-        $params = [$id];
-        
-        if ($archivedBy) {
-            $sql .= ', archived_by = ? WHERE id = ?';
-            $params = [$archivedBy, $id];
-        } else {
-            $sql .= ' WHERE id = ?';
+        $sets = ['is_archived = 1'];
+        $params = [];
+
+        if ($this->folderColumnExists('archived_at')) {
+            $sets[] = 'archived_at = NOW()';
         }
-        
+
+        if ($archivedBy && $this->folderColumnExists('archived_by')) {
+            $sets[] = 'archived_by = ?';
+            $params[] = (int)$archivedBy;
+        }
+
+        $params[] = (int)$id;
+        $sql = 'UPDATE folders SET ' . implode(', ', $sets) . ' WHERE id = ?';
+
         try {
             return $this->db->execute($sql, $params) > 0;
         } catch(Exception $e) {
             error_log("Folder archive error: " . $e->getMessage());
             return false;
         }
+    }
+
+    /**
+     * Get archived folders (trash)
+     */
+    public function getTrashed() {
+        $select = ['f.*', 'u.full_name as created_by_name'];
+        $joins = ['LEFT JOIN users u ON f.created_by = u.id'];
+
+        if ($this->folderColumnExists('archived_by')) {
+            $select[] = 'au.full_name as archived_by_name';
+            $joins[] = 'LEFT JOIN users au ON f.archived_by = au.id';
+        }
+
+        $orderBy = $this->folderColumnExists('archived_at') ? 'f.archived_at DESC' : 'f.updated_at DESC';
+
+        $sql = 'SELECT ' . implode(', ', $select) . '
+                FROM folders f
+                ' . implode("\n", $joins) . '
+                WHERE f.is_archived = 1
+                ORDER BY ' . $orderBy;
+
+        return $this->db->fetchAll($sql, []);
+    }
+
+    /**
+     * Restore archived folder
+     */
+    public function restore($id) {
+        $sets = ['is_archived = 0'];
+        if ($this->folderColumnExists('archived_at')) {
+            $sets[] = 'archived_at = NULL';
+        }
+        if ($this->folderColumnExists('archived_by')) {
+            $sets[] = 'archived_by = NULL';
+        }
+        $sql = 'UPDATE folders SET ' . implode(', ', $sets) . ' WHERE id = ?';
+        return $this->db->execute($sql, [(int)$id]) > 0;
+    }
+
+    /**
+     * Permanently delete a folder tree and (optionally) its files.
+     * If DocumentFile model is provided, it will hard-delete physical files + DB rows.
+     */
+    public function permanentDeleteRecursive($folderId, $documentFileModel = null) {
+        $folderId = (int)$folderId;
+        if ($folderId <= 0) return false;
+
+        // Gather descendant folder IDs (including archived)
+        $folderIds = [];
+        $stack = [$folderId];
+        while (!empty($stack)) {
+            $current = array_pop($stack);
+            if (isset($folderIds[$current])) continue;
+            $folderIds[$current] = true;
+
+            $children = $this->getSubFolders($current, true);
+            foreach ($children as $child) {
+                $cid = (int)($child['id'] ?? 0);
+                if ($cid > 0 && !isset($folderIds[$cid])) {
+                    $stack[] = $cid;
+                }
+            }
+        }
+
+        $idList = array_keys($folderIds);
+        if (empty($idList)) return false;
+
+        // Delete files in these folders (all, not just deleted) to avoid orphans
+        if ($documentFileModel && method_exists($documentFileModel, 'getFilesByFolderIds') && method_exists($documentFileModel, 'permanentDelete')) {
+            $files = $documentFileModel->getFilesByFolderIds($idList);
+            foreach ($files as $file) {
+                $documentFileModel->permanentDelete((int)$file['id']);
+            }
+        }
+
+        // Delete folders bottom-up (reverse order helps if no cascade)
+        $idList = array_reverse($idList);
+        foreach ($idList as $fid) {
+            $this->db->execute('DELETE FROM folders WHERE id = ?', [(int)$fid]);
+        }
+
+        return true;
     }
 
     /**

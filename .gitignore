@@ -1,0 +1,15 @@
+# Runtime / generated content
+/uploads/documents/**
+/uploads/trash/**
+
+# Keep uploads security rules in repo (already tracked)
+!/uploads/.htaccess
+
+# Record folders module uploads (runtime)
+/app/views/admin/record_folders/uploads/**
+
+# Common OS/editor noise
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.log

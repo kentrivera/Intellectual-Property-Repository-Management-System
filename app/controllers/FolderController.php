@@ -68,6 +68,49 @@ class FolderController extends Controller {
             }
         }
     }
+
+    public function restore() {
+        $this->requireAdmin();
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->json(['success' => false, 'message' => 'Invalid request method']);
+            return;
+        }
+
+        $id = (int)($_POST['id'] ?? 0);
+        if ($id <= 0) {
+            $this->json(['success' => false, 'message' => 'Invalid folder id']);
+            return;
+        }
+
+        $ok = $this->folderModel->restore($id);
+        $this->json(['success' => (bool)$ok, 'message' => $ok ? 'Folder restored successfully' : 'Failed to restore folder']);
+    }
+
+    public function permanentDelete() {
+        $this->requireAdmin();
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->json(['success' => false, 'message' => 'Invalid request method']);
+            return;
+        }
+
+        $id = (int)($_POST['id'] ?? 0);
+        if ($id <= 0) {
+            $this->json(['success' => false, 'message' => 'Invalid folder id']);
+            return;
+        }
+
+        // Best effort: if DocumentFile model exists, permanently delete files under the folder tree
+        $documentFileModel = null;
+        if (file_exists(APP_PATH . '/models/DocumentFile.php')) {
+            require_once APP_PATH . '/models/DocumentFile.php';
+            $documentFileModel = new DocumentFile();
+        }
+
+        $ok = $this->folderModel->permanentDeleteRecursive($id, $documentFileModel);
+        $this->json(['success' => (bool)$ok, 'message' => $ok ? 'Folder permanently deleted' : 'Failed to permanently delete folder']);
+    }
     
     // API endpoint to get folders usually called via AJAX
     public function list() {

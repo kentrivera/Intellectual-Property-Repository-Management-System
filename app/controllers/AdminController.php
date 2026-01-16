@@ -430,13 +430,99 @@ class AdminController extends Controller {
      * Trash Bin
      */
     public function trashBin() {
-        $deletedDocuments = $this->documentModel->getTrashed();
-        
+        $trashedDocuments = $this->documentModel->getTrashed();
+        $trashedRecords = method_exists($this->ipRecordModel, 'getTrashed')
+            ? $this->ipRecordModel->getTrashed()
+            : [];
+
+        $trashedFolders = method_exists($this->folderModel, 'getTrashed')
+            ? $this->folderModel->getTrashed()
+            : [];
+
+        $trashedFiles = ($this->documentFileModel && method_exists($this->documentFileModel, 'getTrashed'))
+            ? $this->documentFileModel->getTrashed()
+            : [];
+
         $this->view('admin/trash', [
-            'documents' => $deletedDocuments,
+            'trashedDocuments' => $trashedDocuments,
+            'trashedRecords' => $trashedRecords,
+            'trashedFolders' => $trashedFolders,
+            'trashedFiles' => $trashedFiles,
             'page_title' => 'Trash Bin',
             'csrf_token' => $this->generateCSRF()
         ]);
+    }
+
+    /**
+     * Empty Trash Bin (permanent delete everything in trash)
+     */
+    public function emptyTrash() {
+        $this->requireAdmin();
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->json(['success' => false, 'message' => 'Invalid request method']);
+            return;
+        }
+
+        try {
+            // IP documents
+            $docs = $this->documentModel->getTrashed();
+            foreach ($docs as $doc) {
+                // Delete all versions files
+                if (method_exists($this->documentModel, 'getVersions')) {
+                    $versions = $this->documentModel->getVersions((int)$doc['id']);
+                    foreach ($versions as $version) {
+                        if (!empty($version['file_path']) && file_exists($version['file_path'])) {
+                            @unlink($version['file_path']);
+                        }
+                    }
+                }
+
+                // Delete file in trash (if moved there)
+                if (defined('TRASH_PATH') && !empty($doc['file_path'])) {
+                    $trashPath = TRASH_PATH . '/' . basename($doc['file_path']);
+                    if (file_exists($trashPath)) {
+                        @unlink($trashPath);
+                    }
+                }
+
+                // Delete file in original path (fallback)
+                if (!empty($doc['file_path']) && file_exists($doc['file_path'])) {
+                    @unlink($doc['file_path']);
+                }
+
+                $this->documentModel->permanentDelete((int)$doc['id']);
+            }
+
+            // IP records (archived)
+            if (method_exists($this->ipRecordModel, 'getTrashed') && method_exists($this->ipRecordModel, 'permanentDelete')) {
+                $records = $this->ipRecordModel->getTrashed();
+                foreach ($records as $record) {
+                    $this->ipRecordModel->permanentDelete((int)$record['id']);
+                }
+            }
+
+            // Folder-based files
+            if ($this->documentFileModel && method_exists($this->documentFileModel, 'getTrashed') && method_exists($this->documentFileModel, 'permanentDelete')) {
+                $files = $this->documentFileModel->getTrashed();
+                foreach ($files as $file) {
+                    $this->documentFileModel->permanentDelete((int)$file['id']);
+                }
+            }
+
+            // Archived folders
+            if (method_exists($this->folderModel, 'getTrashed') && method_exists($this->folderModel, 'permanentDeleteRecursive')) {
+                $folders = $this->folderModel->getTrashed();
+                foreach ($folders as $folder) {
+                    $this->folderModel->permanentDeleteRecursive((int)$folder['id'], $this->documentFileModel);
+                }
+            }
+
+            $this->json(['success' => true, 'message' => 'Trash emptied']);
+        } catch (Exception $e) {
+            error_log('Empty trash error: ' . $e->getMessage());
+            $this->json(['success' => false, 'message' => 'Failed to empty trash']);
+        }
     }
     
     /**

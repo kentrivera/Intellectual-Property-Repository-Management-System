@@ -1,202 +1,363 @@
-<?php 
-ob_start(); 
-$page_title = 'IP Records';
-
-// Initialize data if not provided by controller
-if (!isset($records)) $records = [];
-if (!isset($folders)) $folders = [];
-if (!isset($ip_types)) $ip_types = [];
-if (!isset($stats)) {
-    $stats = [
-        'patent_count' => 0,
-        'trademark_count' => 0,
-        'copyright_count' => 0,
-        'design_count' => 0,
-        'archived_count' => 0,
-        'recent_count' => 0
-    ];
-}
-
-// Get current context from URL parameters
-$currentFolderId = $_GET['folder_id'] ?? null;
-$currentFolder = $_GET['folder'] ?? null;
-$type_filter = $_GET['type'] ?? '';
-$status_filter = $_GET['status'] ?? '';
-
-// Determine current path and folder info
-$currentPath = [];
-$currentFolderData = null;
-if ($currentFolderId) {
-    // Get folder data from database or folders array
-    foreach ($folders as $folder) {
-        if ($folder['id'] == $currentFolderId) {
-            $currentFolderData = $folder;
-            break;
-        }
-    }
-}
-
-// Helper functions
-function getGradientColor($typeId) {
-    $colors = [
-        1 => 'from-blue-500 to-blue-600',
-        2 => 'from-green-500 to-green-600',
-        3 => 'from-purple-500 to-purple-600',
-        4 => 'from-orange-500 to-orange-600'
-    ];
-    return $colors[$typeId] ?? 'from-gray-500 to-gray-600';
-}
-
-function getStatusBadge($status) {
-    $badges = [
-        'active' => 'bg-green-100 text-green-700',
-        'pending' => 'bg-yellow-100 text-yellow-700',
-        'approved' => 'bg-blue-100 text-blue-700',
-        'expired' => 'bg-red-100 text-red-700',
-        'archived' => 'bg-gray-100 text-gray-700'
-    ];
-    return $badges[strtolower($status)] ?? 'bg-gray-100 text-gray-700';
-}
-
-// Ensure filter variables exist
-if (!isset($type_filter)) $type_filter = '';
-if (!isset($status_filter)) $status_filter = '';
-
-// Determine current folder name for breadcrumbs
-$currentFolderName = 'All Records';
-if ($type_filter == 1) $currentFolderName = 'Patents';
-elseif ($type_filter == 2) $currentFolderName = 'Trademarks';
-elseif ($type_filter == 3) $currentFolderName = 'Copyrights';
-elseif ($type_filter == 4) $currentFolderName = 'Industrial Designs';
-elseif ($status_filter == 'archived') $currentFolderName = 'Archived';
-elseif (isset($_GET['folder'])) $currentFolderName = htmlspecialchars(ucfirst(str_replace('-', ' ', $_GET['folder'])));
+<?php
+ob_start();
+$page_title = 'Folder Repository';
 ?>
 
-<!-- Enhanced Dynamic Breadcrumb Navigation -->
-<nav class="flex items-center space-x-1.5 sm:space-x-2 text-xs sm:text-sm mb-4 sm:mb-6 overflow-x-auto pb-2 bg-white rounded-lg shadow-sm p-3" id="breadcrumbNav">
-    <button onclick="navigateToRoot()" class="flex items-center text-gray-600 hover:text-blue-600 transition whitespace-nowrap flex-shrink-0">
-        <i class="fas fa-home mr-1.5 sm:mr-2 text-xs sm:text-sm"></i>
-        <span class="hidden sm:inline">IP Repository</span>
-        <span class="sm:hidden">Home</span>
-    </button>
+<style>
+    body {
+        font-size: 13px;
+    }
     
-    <!-- Dynamic Breadcrumb Path -->
-    <div id="breadcrumbPath" class="flex items-center space-x-1.5">
-        <?php if ($currentFolderData || $type_filter || $status_filter): ?>
-            <i class="fas fa-chevron-right text-gray-400 mx-1"></i>
-            <?php if ($type_filter): ?>
-                <span class="text-blue-600 font-medium">
-                    <?php 
-                    $typeNames = ['1' => 'Patents', '2' => 'Trademarks', '3' => 'Copyrights', '4' => 'Industrial Designs'];
-                    echo $typeNames[$type_filter] ?? 'Unknown Type';
-                    ?>
-                </span>
-            <?php elseif ($status_filter): ?>
-                <span class="text-blue-600 font-medium"><?= ucfirst($status_filter) ?></span>
-            <?php elseif ($currentFolderData): ?>
-                <span class="text-blue-600 font-medium"><?= htmlspecialchars($currentFolderData['name']) ?></span>
-            <?php endif; ?>
-        <?php endif; ?>
-    </div>
+    .folder-tree-item {
+        position: relative;
+    }
     
-    <!-- Folder Info and Actions -->
-    <div class="ml-auto flex items-center space-x-2 text-xs text-gray-500">
-        <span id="folderStats" class="hidden sm:inline">
-            <?php if (isset($stats['total_files'])): ?>
-                <?= $stats['total_files'] ?? 0 ?> files
-            <?php endif; ?>
-        </span>
-        <button onclick="refreshCurrentView()" class="p-1 hover:bg-gray-100 rounded transition" title="Refresh">
-            <i class="fas fa-sync text-xs"></i>
-        </button>
-        <button onclick="toggleViewInfo()" class="p-1 hover:bg-gray-100 rounded transition" title="View information">
-            <i class="fas fa-info-circle text-xs"></i>
-        </button>
-    </div>
-</nav>
+    .tree-chevron {
+        transition: transform 0.2s;
+    }
+    
+    .tree-children {
+        transition: all 0.3s ease;
+    }
+    
+    #folderTree::-webkit-scrollbar {
+        width: 4px;
+    }
+    
+    #folderTree::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    
+    #folderTree::-webkit-scrollbar-thumb {
+        background: #c1c1c1;
+        border-radius: 2px;
+    }
+    
+    #folderTree::-webkit-scrollbar-thumb:hover {
+        background: #a8a8a8;
+    }
+    
+    .fade-in {
+        animation: fadeIn 0.3s ease-in;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+    
+    /* Responsive utilities */
+    .line-clamp-2 {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    
+    /* Custom scrollbar for panels */
+    #foldersList::-webkit-scrollbar,
+    #filesList::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
+    }
+    
+    #foldersList::-webkit-scrollbar-track,
+    #filesList::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    
+    #foldersList::-webkit-scrollbar-thumb,
+    #filesList::-webkit-scrollbar-thumb {
+        background: #c1c1c1;
+        border-radius: 2px;
+    }
+    
+    #foldersList::-webkit-scrollbar-thumb:hover,
+    #filesList::-webkit-scrollbar-thumb:hover {
+        background: #a8a8a8;
+    }
+    
+    /* Google Drive-like hover effects */
+    .drive-item:hover {
+        background: #f0f7f4;
+    }
+    
+    .drive-button {
+        font-size: 13px;
+        padding: 6px 16px;
+        border-radius: 4px;
+    }
+    
+    .drive-icon-btn {
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        transition: all 0.2s;
+    }
+    
+    .drive-icon-btn:hover {
+        background: #e8f5e9;
+    }
+    
+    /* Hide scrollbar on mobile for cleaner look */
+    @media (max-width: 640px) {
+        #breadcrumb::-webkit-scrollbar {
+            display: none;
+        }
+        #breadcrumb {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    }
+</style>
 
-<!-- Toolbar -->
-<div class="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-4 sm:mb-6 gap-3 sm:gap-4">
-    <div class="flex-1 max-w-2xl">
-        <div class="relative">
-            <i class="fas fa-search absolute left-3 sm:left-4 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm"></i>
-            <input type="text" id="searchInput" 
-                   placeholder="Search in IP Repository..." 
-                   class="w-full pl-10 sm:pl-12 pr-3 sm:pr-4 py-2.5 sm:py-3 text-sm sm:text-base bg-white hover:shadow-md border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 rounded-lg transition"
-                   onkeyup="filterRecords()">
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    <!-- Header - Google Drive Style -->
+    <header class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
+        <div class="px-3 sm:px-4 py-2">
+            <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center space-x-2 sm:space-x-3 flex-shrink-0">
+                    <i class="fas fa-folder text-lg sm:text-xl text-green-600"></i>
+                    <h1 class="text-sm sm:text-base font-medium text-gray-700 hidden sm:block">Folder Repository</h1>
+                </div>
+                
+                <!-- Search Bar -->
+                <div class="flex-1 max-w-2xl">
+                    <div class="relative">
+                        <input type="text" id="searchInput" placeholder="Search files and folders..." 
+                            class="w-full pl-9 pr-3 py-1.5 text-sm bg-gray-100 border-0 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500 transition" 
+                            onkeyup="handleSearch(event)">
+                        <i class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-xs"></i>
+                        <button onclick="clearSearch()" id="clearSearchBtn" class="hidden absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                            <i class="fas fa-times text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <button onclick="Swal.fire({icon: 'info', title: 'Folder Repository', text: 'This page uses the Record Folders UI integrated into the main system.'})" class="drive-icon-btn text-gray-600 hover:text-green-600 transition flex-shrink-0" title="Info">
+                    <i class="fas fa-info-circle text-lg"></i>
+                </button>
+            </div>
         </div>
-    </div>
-    
-    <div class="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-2 lg:pb-0">
-        <div class="relative flex-shrink-0">
-            <button id="newMenuBtn" onclick="toggleNewMenu(event)" class="bg-blue-600 hover:bg-blue-700 text-white px-3 sm:px-4 py-2 sm:py-2.5 text-sm rounded-lg transition shadow-sm flex items-center whitespace-nowrap">
-                <i class="fas fa-plus mr-1.5 sm:mr-2 text-xs sm:text-sm"></i><span class="hidden xs:inline">New</span>
-                <i class="fas fa-chevron-down ml-1.5 sm:ml-2 text-xs"></i>
-            </button>
-            <!-- Enhanced New Menu Dropdown -->
-            <div id="newMenu" class="hidden fixed w-64 bg-white rounded-lg shadow-xl border border-gray-200 z-[9999]">
-                <!-- Folder Operations -->
-                <div class="p-2 border-b border-gray-100">
-                    <p class="text-xs font-medium text-gray-500 uppercase tracking-wide px-2 mb-2">Folders</p>
-                    <button onclick="showCreateFolderModal()" class="w-full text-left px-3 py-2.5 hover:bg-blue-50 hover:text-blue-700 flex items-center transition rounded-md">
-                        <i class="fas fa-folder-plus text-blue-600 w-8 text-sm"></i>
-                        <div class="flex-1">
-                            <span class="font-medium text-sm">New Folder</span>
-                            <p class="text-xs text-gray-500">Create a new folder</p>
-                        </div>
+    </header>
+
+    <div class="px-3 sm:px-4 py-3 sm:py-4">
+
+        <!-- Action Bar - Google Drive Style -->
+        <div class="bg-white border-b border-gray-200 py-2 mb-3">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <button onclick="goHome()" class="drive-icon-btn text-gray-600 hover:text-green-600" title="Go to Home">
+                        <i class="fas fa-home text-base"></i>
+                    </button>
+                    <button onclick="refreshContent()" class="drive-icon-btn text-gray-600 hover:text-green-600" title="Refresh">
+                        <i class="fas fa-sync-alt text-sm"></i>
                     </button>
                 </div>
                 
-                <!-- File Operations -->
-                <div class="p-2 border-b border-gray-100">
-                    <p class="text-xs font-medium text-gray-500 uppercase tracking-wide px-2 mb-2">Files</p>
-                    <button onclick="showUploadModal()" class="w-full text-left px-3 py-2.5 hover:bg-green-50 hover:text-green-700 flex items-center transition rounded-md">
-                        <i class="fas fa-cloud-upload-alt text-green-600 w-8 text-sm"></i>
-                        <div class="flex-1">
-                            <span class="font-medium text-sm">Upload Files</span>
-                            <p class="text-xs text-gray-500" id="uploadLocationText">
-                                Upload to <?= $currentFolderData ? htmlspecialchars($currentFolderData['name']) : 'current location' ?>
-                            </p>
-                        </div>
-                    </button>
-                    <button onclick="document.getElementById('folderUpload').click()" class="w-full text-left px-3 py-2.5 hover:bg-purple-50 hover:text-purple-700 flex items-center transition rounded-md">
-                        <i class="fas fa-folder-open text-purple-600 w-8 text-sm"></i>
-                        <div class="flex-1">
-                            <span class="font-medium text-sm">Upload Folder</span>
-                            <p class="text-xs text-gray-500">Upload entire folder structure</p>
-                        </div>
-                    </button>
-                </div>
-                
-                <!-- IP Record Operations -->
-                <div class="p-2">
-                    <p class="text-xs font-medium text-gray-500 uppercase tracking-wide px-2 mb-2">IP Records</p>
-                    <button onclick="openCreateRecordModal()" class="w-full text-left px-3 py-2.5 hover:bg-orange-50 hover:text-orange-700 flex items-center transition rounded-md">
-                        <i class="fas fa-file-plus text-orange-600 w-8 text-sm"></i>
-                        <div class="flex-1">
-                            <span class="font-medium text-sm">New IP Record</span>
-                            <p class="text-xs text-gray-500">Create intellectual property record</p>
-                        </div>
-                    </button>
+                <span class="text-xs text-gray-500" id="itemCount">0 items</span>
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-0">
+            <!-- Folders Panel - Google Drive Sidebar -->
+            <div class="lg:col-span-1 border-r border-gray-200 bg-white">
+                <div class="p-2 sm:p-3">
+                    <div class="flex items-center space-x-2 px-2 py-1.5">
+                        <i class="fas fa-folder text-sm text-gray-600"></i>
+                        <h2 class="text-xs font-medium text-gray-700 uppercase tracking-wide">Folders</h2>
+                    </div>
+                    <div id="folderTree" class="mt-2 space-y-0.5 max-h-[calc(100vh-200px)] overflow-y-auto pr-1">
+                        <!-- Folder tree will be loaded here -->
+                    </div>
                 </div>
             </div>
-            <input type="file" id="folderUpload" webkitdirectory directory multiple style="display: none;" onchange="handleFolderUpload(event)">
-            <input type="file" id="fileUpload" multiple style="display: none;" onchange="handleFileUpload(event)">
+
+            <!-- Files Panel - Google Drive Main Area -->
+            <div class="lg:col-span-3 bg-white">
+                <div class="px-3 sm:px-4 py-2">
+                    <div class="flex items-center justify-between border-b border-gray-200 pb-3 mb-3">
+                        <div class="flex items-center gap-2">
+                            <button onclick="goBack()" id="backButton" class="drive-icon-btn text-gray-600 hover:text-green-600" title="Go Back">
+                                <i class="fas fa-arrow-left text-sm"></i>
+                            </button>
+                            <h2 class="text-base sm:text-lg font-medium text-gray-800 flex items-center">
+                                <i class="fas fa-folder-open text-green-600 mr-1.5 text-sm"></i>
+                                <span id="currentFolderName">Home</span>
+                            </h2>
+                        </div>
+                        
+                        <!-- Action Buttons -->
+                        <div class="flex items-center gap-1">
+                            <button onclick="showCreateFolderModal()" class="drive-button bg-green-600 text-white hover:bg-green-700 transition flex items-center gap-1.5" title="New Folder">
+                                <i class="fas fa-folder-plus text-xs"></i>
+                                <span class="hidden sm:inline">New Folder</span>
+                            </button>
+                            <button onclick="showUploadModal()" class="drive-button border border-green-600 text-green-600 hover:bg-green-50 transition flex items-center gap-1.5 ml-2" title="Upload">
+                                <i class="fas fa-upload text-xs"></i>
+                                <span class="hidden sm:inline">Upload</span>
+                            </button>
+                            <button id="actionsMenuBtn" onclick="toggleActionsMenu()" class="drive-icon-btn text-gray-600 hover:text-green-600 ml-1" title="More actions">
+                                <i class="fas fa-ellipsis-v text-sm"></i>
+                            </button>
+                            
+                            <!-- Dropdown Menu -->
+                            <div id="actionsMenu" class="hidden absolute right-4 mt-32 w-44 bg-white rounded shadow-lg border border-gray-200 z-50 py-1 text-xs">
+                                <button onclick="showCreateFolderModal(); toggleActionsMenu()" class="w-full text-left px-3 py-2 hover:bg-gray-100 transition flex items-center gap-2 text-gray-700">
+                                    <i class="fas fa-folder-plus text-green-600 w-3"></i>
+                                    <span>New Folder</span>
+                                </button>
+                                <button onclick="showUploadModal(); toggleActionsMenu()" class="w-full text-left px-3 py-2 hover:bg-gray-100 transition flex items-center gap-2 text-gray-700">
+                                    <i class="fas fa-upload text-green-600 w-3"></i>
+                                    <span>Upload File</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <nav id="breadcrumb" class="flex items-center text-xs text-gray-600 bg-gray-50 px-2 py-1.5 rounded mb-3 overflow-x-auto"></nav>
+                    
+                    <div id="pathDisplay" class="hidden flex items-center text-xs text-gray-500 bg-gray-50 px-2 py-1.5 rounded mb-3 overflow-x-auto">
+                        <i class="fas fa-folder-open text-gray-400 mr-1.5 text-xs flex-shrink-0"></i>
+                        <span class="font-mono" id="currentPath">/</span>
+                    </div>
+                    
+                    <div id="filesList" class="space-y-1">
+                        <!-- Folders and files will be loaded here -->
+                    </div>
+                </div>
+            </div>
         </div>
-        <div class="h-5 sm:h-6 w-px bg-gray-300 mx-0.5 sm:mx-1 flex-shrink-0"></div>
-        <button onclick="toggleView('grid')" id="gridViewBtn" 
-                class="view-btn p-2 sm:p-2.5 rounded-lg hover:bg-gray-200 transition flex-shrink-0" title="Grid view">
-            <i class="fas fa-th text-gray-700 text-sm"></i>
-        </button>
-        <button onclick="toggleView('list')" id="listViewBtn" 
-                class="view-btn p-2 sm:p-2.5 rounded-lg hover:bg-gray-200 transition flex-shrink-0" title="List view">
-            <i class="fas fa-list text-gray-700 text-sm"></i>
-        </button>
-        <div class="h-5 sm:h-6 w-px bg-gray-300 mx-0.5 sm:mx-1 flex-shrink-0"></div>
-        <button onclick="showSortMenu()" class="p-2 sm:p-2.5 rounded-lg hover:bg-gray-200 transition flex-shrink-0" title="Sort options">
-            <i class="fas fa-sort-amount-down text-gray-700 text-sm"></i>
-        </button>
-        <button onclick="showFilterMenu()" class="p-2 sm:p-2.5 rounded-lg hover:bg-gray-200 transition flex-shrink-0" title="Filter">
+    </div>
+
+    <!-- Create Folder Modal -->
+    <div id="createFolderModal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-3">
+        <div class="bg-white rounded-lg shadow-2xl w-full max-w-md">
+            <div class="px-5 py-4 border-b border-gray-200">
+                <h3 class="text-base font-medium text-gray-800">New folder</h3>
+            </div>
+            <form onsubmit="createFolder(event)" class="p-5">
+                <div class="mb-4">
+                    <input type="text" id="folderName" required class="w-full px-3 py-2 text-sm border-b border-gray-300 focus:border-green-600 focus:outline-none" placeholder="Folder name">
+                </div>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button type="button" onclick="hideCreateFolderModal()" class="drive-button text-gray-600 hover:bg-gray-100">Cancel</button>
+                    <button type="submit" class="drive-button bg-green-600 text-white hover:bg-green-700">Create</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Upload File Modal -->
+    <div id="uploadModal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-3">
+        <div class="bg-white rounded-lg shadow-2xl w-full max-w-md">
+            <div class="px-5 py-4 border-b border-gray-200">
+                <h3 class="text-base font-medium text-gray-800">Upload file</h3>
+            </div>
+            <form onsubmit="uploadFile(event)" class="p-5">
+                <div class="mb-4">
+                    <label class="block text-xs text-gray-600 mb-2">Select file</label>
+                    <input type="file" id="fileInput" required class="w-full text-sm px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-green-600">
+                    <p class="text-xs text-gray-400 mt-1">Max file size: 50MB</p>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-xs text-gray-600 mb-2">Description (Optional)</label>
+                    <textarea id="fileDescription" rows="2" class="w-full text-sm px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-green-600" placeholder="Add description"></textarea>
+                </div>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button type="button" onclick="hideUploadModal()" class="drive-button text-gray-600 hover:bg-gray-100">Cancel</button>
+                    <button type="submit" class="drive-button bg-green-600 text-white hover:bg-green-700">Upload</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit File Modal -->
+    <div id="editFileModal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-3">
+        <div class="bg-white rounded-lg shadow-2xl w-full max-w-md">
+            <div class="px-5 py-4 border-b border-gray-200">
+                <h3 class="text-base font-medium text-gray-800">Edit file</h3>
+            </div>
+            <form onsubmit="updateFile(event)" class="p-5">
+                <input type="hidden" id="editFileId">
+                <div class="mb-4">
+                    <label class="block text-xs text-gray-600 mb-2">File name</label>
+                    <input type="text" id="editFileName" required class="w-full text-sm px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-green-600">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-xs text-gray-600 mb-2">Description</label>
+                    <textarea id="editFileDescription" rows="2" class="w-full text-sm px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-green-600"></textarea>
+                </div>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button type="button" onclick="hideEditFileModal()" class="drive-button text-gray-600 hover:bg-gray-100">Cancel</button>
+                    <button type="submit" class="drive-button bg-green-600 text-white hover:bg-green-700">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Folder Modal -->
+    <div id="editFolderModal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-3">
+        <div class="bg-white rounded-lg shadow-2xl w-full max-w-md">
+            <div class="px-5 py-4 border-b border-gray-200">
+                <h3 class="text-base font-medium text-gray-800">Rename folder</h3>
+            </div>
+            <form onsubmit="updateFolder(event)" class="p-5">
+                <input type="hidden" id="editFolderId">
+                <div class="mb-4">
+                    <input type="text" id="editFolderName" required class="w-full px-3 py-2 text-sm border-b border-gray-300 focus:border-green-600 focus:outline-none" placeholder="Folder name">
+                </div>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button type="button" onclick="hideEditFolderModal()" class="drive-button text-gray-600 hover:bg-gray-100">Cancel</button>
+                    <button type="submit" class="drive-button bg-green-600 text-white hover:bg-green-700">Rename</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- File Preview Modal -->
+    <div id="previewModal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-3 sm:p-4">
+        <div class="bg-white rounded-lg shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center px-4 py-3 border-b border-gray-200">
+                <div>
+                    <h3 class="text-base font-medium text-gray-800" id="previewFileName">File Preview</h3>
+                    <p class="text-xs text-gray-500 mt-0.5" id="previewFileInfo"></p>
+                </div>
+                <button onclick="hidePreviewModal()" class="drive-icon-btn text-gray-600 hover:text-gray-800">
+                    <i class="fas fa-times text-base"></i>
+                </button>
+            </div>
+            <div class="flex-1 overflow-auto p-4" id="previewContent"></div>
+            <div class="flex justify-end gap-2 px-4 py-3 border-t border-gray-200 bg-gray-50">
+                <button onclick="hidePreviewModal()" class="drive-button text-gray-600 hover:bg-gray-100">Close</button>
+                <button onclick="downloadFileFromPreview()" id="previewDownloadBtn" class="drive-button bg-green-600 text-white hover:bg-green-700 flex items-center gap-1.5">
+                    <i class="fas fa-download text-xs"></i>
+                    <span>Download</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="hidden fixed inset-0 bg-white bg-opacity-80 flex items-center justify-center z-50">
+        <div class="flex items-center gap-3">
+            <i class="fas fa-circle-notch fa-spin text-xl text-green-600"></i>
+            <span class="text-sm text-gray-700">Loading...</span>
+        </div>
+    </div>
+</div>
+
+<script src="<?= BASE_URL ?>/js/record-folders/app.js"></script>
+<?php
+$content = ob_get_clean();
+require_once APP_PATH . '/views/layouts/main.php';
+return;
+?>
             <i class="fas fa-filter text-gray-700 text-sm"></i>
         </button>
         <button onclick="exportRecords()" class="p-2 sm:p-2.5 rounded-lg hover:bg-gray-200 transition flex-shrink-0" title="Export">
@@ -1082,11 +1243,14 @@ elseif (isset($_GET['folder'])) $currentFolderName = htmlspecialchars(ucfirst(st
         }
         
         function renderFolderContents(data) {
-            const { files, folder, stats } = data;
+            const { folders, files, folder, stats } = data;
             const gridContainer = document.getElementById('itemsGrid');
             const listContainer = document.getElementById('itemsList');
             
-            if (!files || files.length === 0) {
+            const hasFolders = Array.isArray(folders) && folders.length > 0;
+            const hasFiles = Array.isArray(files) && files.length > 0;
+
+            if (!hasFolders && !hasFiles) {
                 showEmptyState();
                 return;
             }
@@ -1094,24 +1258,131 @@ elseif (isset($_GET['folder'])) $currentFolderName = htmlspecialchars(ucfirst(st
             // Clear containers
             if (gridContainer) gridContainer.innerHTML = '';
             if (listContainer) listContainer.innerHTML = '';
+
+            // Render folders first
+            if (hasFolders) {
+                if (gridContainer) {
+                    folders.forEach(folderItem => {
+                        const folderCard = createFolderCard(folderItem);
+                        gridContainer.appendChild(folderCard);
+                    });
+                }
+
+                if (listContainer) {
+                    folders.forEach(folderItem => {
+                        const folderRow = createFolderRow(folderItem);
+                        listContainer.appendChild(folderRow);
+                    });
+                }
+            }
             
             // Render files in grid view
             if (gridContainer) {
-                files.forEach(file => {
-                    const fileCard = createFileCard(file);
-                    gridContainer.appendChild(fileCard);
-                });
+                if (hasFiles) {
+                    files.forEach(file => {
+                        const fileCard = createFileCard(file);
+                        gridContainer.appendChild(fileCard);
+                    });
+                }
             }
             
             // Render files in list view
             if (listContainer) {
-                files.forEach(file => {
-                    const fileRow = createFileRow(file);
-                    listContainer.appendChild(fileRow);
-                });
+                if (hasFiles) {
+                    files.forEach(file => {
+                        const fileRow = createFileRow(file);
+                        listContainer.appendChild(fileRow);
+                    });
+                }
             }
             
             hideEmptyState();
+        }
+
+        function navigateToFolder(folderId) {
+            currentFolderId = folderId;
+            try {
+                const url = new URL(window.location);
+                url.searchParams.set('folder_id', folderId);
+                url.searchParams.delete('type');
+                url.searchParams.delete('status');
+                history.pushState({ folder_id: folderId }, '', url.toString());
+            } catch (e) {
+                // no-op
+            }
+            loadFolderContents(folderId);
+        }
+
+        function createFolderCard(folder) {
+            const card = document.createElement('div');
+            card.className = 'bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md cursor-pointer transition group relative';
+            card.onclick = () => navigateToFolder(folder.id);
+
+            const color = folder.color || '#6B7280';
+            const fileCount = folder.file_count ?? 0;
+
+            card.innerHTML = `
+                <div class="flex flex-col items-center text-center">
+                    <div class="w-12 h-12 flex items-center justify-center mb-3" style="color: ${color}">
+                        <i class="fas fa-folder text-3xl"></i>
+                    </div>
+                    <p class="text-sm font-medium text-gray-900 truncate w-full" title="${escapeHtml(folder.name)}">${escapeHtml(folder.name)}</p>
+                    <p class="text-xs text-gray-500 mt-1">${fileCount} item(s)</p>
+                </div>
+                <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition">
+                    <button onclick="event.stopPropagation(); showCustomFolderMenu(event, '${escapeHtml(folder.name)}', ${folder.id})" class="p-1 hover:bg-gray-200 rounded">
+                        <i class="fas fa-ellipsis-v text-xs text-gray-600"></i>
+                    </button>
+                </div>
+            `;
+
+            return card;
+        }
+
+        function createFolderRow(folder) {
+            const row = document.createElement('tr');
+            row.className = 'hover:bg-gray-50 cursor-pointer';
+            row.onclick = () => navigateToFolder(folder.id);
+
+            const fileCount = folder.file_count ?? 0;
+            const modified = folder.updated_at ? new Date(folder.updated_at).toLocaleDateString() : '';
+
+            row.innerHTML = `
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <input type="checkbox" class="file-checkbox" value="folder-${folder.id}" onclick="event.stopPropagation()">
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="flex items-center">
+                        <div class="w-8 h-8 flex items-center justify-center mr-3" style="color: ${folder.color || '#6B7280'}">
+                            <i class="fas fa-folder"></i>
+                        </div>
+                        <div>
+                            <p class="text-sm font-medium text-gray-900">${escapeHtml(folder.name)}</p>
+                            <p class="text-xs text-gray-500">${fileCount} item(s)</p>
+                        </div>
+                    </div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">FOLDER</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">—</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${modified}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <button onclick="event.stopPropagation(); showCustomFolderMenu(event, '${escapeHtml(folder.name)}', ${folder.id})" class="p-1 hover:bg-gray-200 rounded">
+                        <i class="fas fa-ellipsis-v text-gray-600"></i>
+                    </button>
+                </td>
+            `;
+
+            return row;
+        }
+
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
         }
         
         function createFileCard(file) {
@@ -1564,10 +1835,30 @@ elseif (isset($_GET['folder'])) $currentFolderName = htmlspecialchars(ucfirst(st
         }
         
         function updateFolderInfo(data) {
-            // Update folder statistics and info
+            const folderNameEl = document.getElementById('currentFolderName');
+            const folderDescEl = document.getElementById('currentFolderDescription');
+            const fileCountEl = document.getElementById('fileCount');
+            const subfolderCountEl = document.getElementById('subfolderCount');
+            const totalSizeEl = document.getElementById('totalSize');
+
+            if (folderNameEl) {
+                folderNameEl.textContent = data.folder?.name || 'All Files';
+            }
+            if (folderDescEl) {
+                folderDescEl.textContent = data.folder?.description || '';
+            }
+
+            const stats = data.stats || {};
+            const folders = Array.isArray(data.folders) ? data.folders : [];
+            const files = Array.isArray(data.files) ? data.files : [];
+
+            if (fileCountEl) fileCountEl.textContent = stats.total_files ?? files.length ?? 0;
+            if (subfolderCountEl) subfolderCountEl.textContent = stats.subfolder_count ?? folders.length ?? 0;
+            if (totalSizeEl) totalSizeEl.textContent = formatFileSize(stats.total_size ?? 0);
+
             const folderStats = document.getElementById('folderStats');
-            if (folderStats && data.stats) {
-                folderStats.textContent = `${data.stats.file_count || 0} files`;
+            if (folderStats) {
+                folderStats.textContent = `${fileCountEl ? fileCountEl.textContent : (files.length || 0)} files`;
             }
         }
         

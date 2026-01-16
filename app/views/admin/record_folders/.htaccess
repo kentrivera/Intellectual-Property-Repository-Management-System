@@ -1,0 +1,23 @@
+# Enable Rewrite Engine
+RewriteEngine On
+
+# Prevent directory listing
+Options -Indexes
+
+# Protect uploads directory from direct PHP execution
+<FilesMatch "\.(php|phtml|php3|php4|php5|php7|phps)$">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>
+
+# Allow specific PHP files to execute
+<FilesMatch "^(index|upload|api_folders|api_files)\.php$">
+    Order Allow,Deny
+    Allow from all
+</FilesMatch>
+
+# Increase upload limits (if not set in php.ini)
+php_value upload_max_filesize 50M
+php_value post_max_size 50M
+php_value max_execution_time 300
+php_value max_input_time 300

@@ -193,6 +193,36 @@ class IPRecord {
         $sql = "UPDATE ip_records SET is_archived = 1, archived_at = NOW() WHERE id = ?";
         return $this->db->execute($sql, [$id]);
     }
+
+    /**
+     * Get archived (trashed) IP records
+     * Returned keys match the existing trash view.
+     */
+    public function getTrashed() {
+        $sql = "SELECT ir.id, ir.ip_type_id, it.type_name as ip_type,
+                       ir.title, ir.description, ir.owner,
+                       ir.archived_at as deleted_at
+                FROM ip_records ir
+                INNER JOIN ip_types it ON ir.ip_type_id = it.id
+                WHERE ir.is_archived = 1
+                ORDER BY ir.archived_at DESC";
+        return $this->db->fetchAll($sql, []);
+    }
+
+    /**
+     * Restore archived IP record
+     */
+    public function restore($id) {
+        $sql = "UPDATE ip_records SET is_archived = 0, archived_at = NULL WHERE id = ?";
+        return $this->db->execute($sql, [$id]);
+    }
+
+    /**
+     * Permanently delete IP record
+     */
+    public function permanentDelete($id) {
+        return $this->delete($id);
+    }
     
     /**
      * Delete IP record permanently

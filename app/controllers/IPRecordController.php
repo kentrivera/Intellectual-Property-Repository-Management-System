@@ -5,10 +5,12 @@
  */
 
 require_once APP_PATH . '/models/IPRecord.php';
+require_once APP_PATH . '/models/Document.php';
 require_once APP_PATH . '/models/ActivityLog.php';
 
 class IPRecordController extends Controller {
     private $ipRecordModel;
+    private $documentModel;
     private $activityLog;
     
     public function __construct() {
@@ -16,6 +18,7 @@ class IPRecordController extends Controller {
         $this->requireAdmin();
         
         $this->ipRecordModel = new IPRecord();
+        $this->documentModel = new Document();
         $this->activityLog = new ActivityLog();
     }
     
@@ -153,6 +156,89 @@ class IPRecordController extends Controller {
             ]);
             
             $this->json(['success' => true, 'message' => 'IP Record deleted successfully']);
+        }
+    }
+
+    /**
+     * Restore IP Record from trash (un-archive)
+     */
+    public function restore() {
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $recordId = (int)($_POST['record_id'] ?? 0);
+            if ($recordId <= 0) {
+                $this->json(['success' => false, 'message' => 'Invalid record id']);
+            }
+
+            $ok = $this->ipRecordModel->restore($recordId);
+            if ($ok) {
+                $this->activityLog->log([
+                    'user_id' => $this->getCurrentUserId(),
+                    'action_type' => 'restore',
+                    'entity_type' => 'ip_record',
+                    'entity_id' => $recordId,
+                    'description' => "Restored IP record from trash: ID {$recordId}"
+                ]);
+            }
+
+            $this->json(['success' => (bool)$ok, 'message' => $ok ? 'IP Record restored successfully' : 'Failed to restore IP Record']);
+        }
+    }
+
+    /**
+     * Permanently delete IP Record and its documents
+     */
+    public function permanentDelete() {
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $recordId = (int)($_POST['record_id'] ?? 0);
+            if ($recordId <= 0) {
+                $this->json(['success' => false, 'message' => 'Invalid record id']);
+            }
+
+            try {
+                // Best-effort delete physical files for all documents (including deleted)
+                $docs = $this->documentModel->getByIPRecord($recordId, true);
+                foreach ($docs as $doc) {
+                    // versions
+                    if (method_exists($this->documentModel, 'getVersions')) {
+                        $versions = $this->documentModel->getVersions((int)$doc['id']);
+                        foreach ($versions as $version) {
+                            if (!empty($version['file_path']) && file_exists($version['file_path'])) {
+                                @unlink($version['file_path']);
+                            }
+                        }
+                    }
+
+                    // trash-path variant
+                    if (defined('TRASH_PATH') && !empty($doc['file_path'])) {
+                        $trashPath = TRASH_PATH . '/' . basename($doc['file_path']);
+                        if (file_exists($trashPath)) {
+                            @unlink($trashPath);
+                        }
+                    }
+
+                    // original-path fallback
+                    if (!empty($doc['file_path']) && file_exists($doc['file_path'])) {
+                        @unlink($doc['file_path']);
+                    }
+                }
+
+                $ok = $this->ipRecordModel->permanentDelete($recordId);
+
+                if ($ok) {
+                    $this->activityLog->log([
+                        'user_id' => $this->getCurrentUserId(),
+                        'action_type' => 'permanent_delete',
+                        'entity_type' => 'ip_record',
+                        'entity_id' => $recordId,
+                        'description' => "Permanently deleted IP record: ID {$recordId}"
+                    ]);
+                }
+
+                $this->json(['success' => (bool)$ok, 'message' => $ok ? 'IP Record permanently deleted' : 'Failed to delete IP Record']);
+            } catch (Exception $e) {
+                error_log('IP record permanent delete error: ' . $e->getMessage());
+                $this->json(['success' => false, 'message' => 'Failed to delete IP Record']);
+            }
         }
     }
 }

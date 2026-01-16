@@ -352,12 +352,124 @@ class DocumentFile {
     /**
      * Find file by ID
      */
-    public function findById($id) {
+    public function findById($id, $includeDeleted = false) {
+        $where = $includeDeleted ? 'WHERE df.id = ?' : 'WHERE df.id = ? AND df.is_deleted = 0';
         $sql = 'SELECT df.*, u.full_name as uploaded_by_name 
                 FROM document_files df 
                 LEFT JOIN users u ON df.uploaded_by = u.id 
-                WHERE df.id = ? AND df.is_deleted = 0';
-        return $this->db->fetch($sql, [$id]);
+                ' . $where;
+        return $this->db->fetch($sql, [(int)$id]);
+    }
+
+    /**
+     * Get deleted files (trash)
+     */
+    public function getTrashed($limit = 500) {
+        $limit = (int)$limit;
+        if ($limit <= 0) $limit = 500;
+        if ($limit > 5000) $limit = 5000;
+
+        $sql = "SELECT df.*, 
+                       u.full_name as uploaded_by_name,
+                       du.full_name as deleted_by_name,
+                       f.name as folder_name,
+                       f.path as folder_path
+                FROM document_files df
+                LEFT JOIN users u ON df.uploaded_by = u.id
+                LEFT JOIN users du ON df.deleted_by = du.id
+                LEFT JOIN folders f ON df.folder_id = f.id
+                WHERE df.is_deleted = 1
+                ORDER BY df.deleted_at DESC
+                LIMIT {$limit}";
+
+        return $this->db->fetchAll($sql, []);
+    }
+
+    /**
+     * Restore deleted file
+     */
+    public function restore($fileId) {
+        $sql = 'UPDATE document_files SET is_deleted = 0, deleted_at = NULL, deleted_by = NULL WHERE id = ?';
+        return $this->db->execute($sql, [(int)$fileId]) > 0;
+    }
+
+    /**
+     * Permanently delete file (DB row + physical file)
+     */
+    public function permanentDelete($fileId) {
+        $fileId = (int)$fileId;
+        if ($fileId <= 0) return false;
+
+        $file = $this->findById($fileId, true);
+        if (!$file) return false;
+
+        if (!empty($file['thumbnail_path']) && file_exists($file['thumbnail_path'])) {
+            @unlink($file['thumbnail_path']);
+        }
+        if (!empty($file['file_path']) && file_exists($file['file_path'])) {
+            @unlink($file['file_path']);
+        }
+
+        return $this->db->execute('DELETE FROM document_files WHERE id = ?', [$fileId]) > 0;
+    }
+
+    /**
+     * Get files by multiple folder ids (used for permanent folder delete)
+     */
+    public function getFilesByFolderIds($folderIds) {
+        if (!is_array($folderIds) || empty($folderIds)) return [];
+        $ids = array_values(array_filter(array_map('intval', $folderIds), fn($v) => $v > 0));
+        if (empty($ids)) return [];
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $sql = "SELECT * FROM document_files WHERE folder_id IN ({$placeholders})";
+        return $this->db->fetchAll($sql, $ids);
+    }
+
+    /**
+     * Update file metadata (does not rename physical file)
+     */
+    public function updateMetadata($fileId, $data) {
+        $fileId = (int)$fileId;
+        if ($fileId <= 0 || !is_array($data) || empty($data)) {
+            return false;
+        }
+
+        $allowed = ['original_name', 'description', 'tags', 'is_public'];
+        $fields = [];
+        $params = [];
+
+        foreach ($data as $key => $value) {
+            if (!in_array($key, $allowed, true)) continue;
+            $fields[] = "$key = ?";
+            $params[] = $value;
+        }
+
+        if (empty($fields)) {
+            return false;
+        }
+
+        $params[] = $fileId;
+        $sql = 'UPDATE document_files SET ' . implode(', ', $fields) . ' WHERE id = ?';
+
+        try {
+            return $this->db->execute($sql, $params) > 0;
+        } catch (Exception $e) {
+            error_log('File metadata update error: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Get all files (for global search UI)
+     */
+    public function getAllFiles() {
+        $sql = "SELECT df.*, f.name as folder_name, f.path as folder_path
+                FROM document_files df
+                LEFT JOIN folders f ON df.folder_id = f.id
+                WHERE df.is_deleted = 0
+                ORDER BY df.original_name ASC";
+        return $this->db->fetchAll($sql, []);
     }
 
     /**

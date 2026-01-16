@@ -140,54 +140,11 @@ LEFT JOIN users u ON f.created_by = u.id
 WHERE f.is_archived = 0
 GROUP BY f.id, f.name, f.path, f.parent_id, f.level, f.color, f.is_system_folder, f.created_at, u.full_name;
 
--- Create triggers to maintain folder paths
-DELIMITER //
-
-CREATE TRIGGER folders_after_insert
-AFTER INSERT ON folders
-FOR EACH ROW
-BEGIN
-    DECLARE parent_path VARCHAR(1000) DEFAULT '';
-    DECLARE folder_level INT DEFAULT 0;
-    
-    IF NEW.parent_id IS NOT NULL THEN
-        SELECT IFNULL(path, ''), level + 1 INTO parent_path, folder_level
-        FROM folders WHERE id = NEW.parent_id;
-    END IF;
-    
-    UPDATE folders 
-    SET path = CONCAT(parent_path, '/', NEW.name),
-        level = folder_level
-    WHERE id = NEW.id;
-END//
-
-CREATE TRIGGER folders_after_update
-AFTER UPDATE ON folders
-FOR EACH ROW
-BEGIN
-    DECLARE parent_path VARCHAR(1000) DEFAULT '';
-    DECLARE folder_level INT DEFAULT 0;
-    
-    IF NEW.parent_id IS NOT NULL THEN
-        SELECT IFNULL(path, ''), level + 1 INTO parent_path, folder_level
-        FROM folders WHERE id = NEW.parent_id;
-    ELSE
-        SET parent_path = '';
-        SET folder_level = 0;
-    END IF;
-    
-    UPDATE folders 
-    SET path = CONCAT(parent_path, '/', NEW.name),
-        level = folder_level
-    WHERE id = NEW.id;
-    
-    -- Update children paths recursively (simplified version)
-    UPDATE folders 
-    SET path = REPLACE(path, OLD.path, NEW.path)
-    WHERE path LIKE CONCAT(OLD.path, '%') AND id != NEW.id;
-END//
-
-DELIMITER ;
+-- Triggers note:
+-- The original AFTER triggers attempted to UPDATE the `folders` table inside a trigger on `folders`,
+-- which causes MySQL error 1442 and breaks folder creation.
+-- We keep paths/levels consistent from application code instead (see app/models/Folder.php).
+-- If you still want trigger-based path/level, use BEFORE triggers that only SET NEW.path/NEW.level.
 
 -- Add indexes for better performance
 ALTER TABLE document_files 

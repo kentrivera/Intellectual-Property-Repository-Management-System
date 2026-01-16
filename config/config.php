@@ -13,7 +13,18 @@ define('DOCUMENT_PATH', UPLOAD_PATH . '/documents');
 define('TRASH_PATH', UPLOAD_PATH . '/trash');
 
 // URL Configuration
-define('BASE_URL', 'http://localhost/Intellectual%20Property%20Repository%20Management%20System/public');
+// Important: under Apache rewrites, SCRIPT_NAME can reflect the rewritten path.
+// Using dirname(SCRIPT_NAME) is the most stable way to compute the app base.
+if (!defined('BASE_URL')) {
+	$https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+		|| (!empty($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443);
+	$scheme = $https ? 'https' : 'http';
+	$host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+
+	$scriptName = str_replace('\\', '/', ($_SERVER['SCRIPT_NAME'] ?? ''));
+	$basePath = $scriptName ? rtrim(dirname($scriptName), '/') : '';
+	define('BASE_URL', $scheme . '://' . $host . $basePath);
+}
 
 // Database Configuration
 define('DB_HOST', 'localhost');

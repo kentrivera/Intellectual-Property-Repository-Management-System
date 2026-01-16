@@ -42,15 +42,25 @@ $router->post('/admin/users/delete', 'AdminController@deleteUser');
 $router->get('/admin/ip-records', 'AdminController@ipRecords');
 $router->get('/admin/ip-records/:id', 'AdminController@viewIPRecord');
 
+// Legacy-compatible endpoints for the Record Folders UI (served via MVC)
+$router->get('/admin/api_folders.php', 'RecordFoldersController@folders');
+$router->post('/admin/api_folders.php', 'RecordFoldersController@folders');
+$router->get('/admin/api_files.php', 'RecordFoldersController@files');
+$router->post('/admin/api_files.php', 'RecordFoldersController@files');
+$router->post('/admin/upload.php', 'RecordFoldersController@upload');
+
 $router->post('/admin/folders/create', 'FolderController@create');
 $router->post('/admin/folders/rename', 'FolderController@rename');
 $router->post('/admin/folders/archive', 'FolderController@archive');
+$router->post('/admin/folders/restore', 'FolderController@restore');
+$router->post('/admin/folders/permanent-delete', 'FolderController@permanentDelete');
 
 $router->get('/admin/download-requests', 'AdminController@downloadRequests');
 $router->post('/admin/download-requests/approve', 'AdminController@approveRequest');
 $router->post('/admin/download-requests/reject', 'AdminController@rejectRequest');
 
 $router->get('/admin/trash', 'AdminController@trashBin');
+$router->post('/admin/trash/empty', 'AdminController@emptyTrash');
 $router->get('/admin/activity-logs', 'AdminController@activityLogs');
 
 // =====================
@@ -85,6 +95,22 @@ $router->post('/document/restore', 'DocumentController@restore');
 $router->post('/document/permanent-delete', 'DocumentController@permanentDelete');
 $router->get('/document/download/:token', 'DocumentController@download');
 
+// Trash actions for folder-based file manager (document_files)
+$router->post('/document-file/restore', 'DocumentController@restoreFile');
+$router->post('/document-file/permanent-delete', 'DocumentController@permanentDeleteFile');
+
+// Backward-compatible (query-string) download endpoint used by some JS
+$router->get('/document/download', 'DocumentController@downloadFile');
+
+// Enhanced folder-based file manager routes
+$router->get('/document/listFiles', 'DocumentController@listFiles');
+$router->get('/document/searchFiles', 'DocumentController@searchFiles');
+$router->get('/document/thumbnail', 'DocumentController@thumbnail');
+$router->get('/document/downloadFile', 'DocumentController@downloadFile');
+$router->post('/document/uploadToFolder', 'DocumentController@uploadToFolder');
+$router->post('/document/moveFile', 'DocumentController@moveFile');
+$router->post('/document/deleteFile', 'DocumentController@deleteFile');
+
 // =====================
 // IP Record Routes (Admin)
 // =====================
@@ -92,6 +118,8 @@ $router->post('/ip-record/create', 'IPRecordController@create');
 $router->post('/ip-record/update', 'IPRecordController@update');
 $router->post('/ip-record/archive', 'IPRecordController@archive');
 $router->post('/ip-record/delete', 'IPRecordController@delete');
+$router->post('/ip-record/restore', 'IPRecordController@restore');
+$router->post('/ip-record/permanent-delete', 'IPRecordController@permanentDelete');
 
 // =====================
 // 404 Handler

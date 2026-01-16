@@ -45,6 +45,10 @@ class Router {
      */
     public function dispatch() {
         $requestMethod = $_SERVER['REQUEST_METHOD'];
+        // Many clients (and tools like `curl -I`) use HEAD. Treat it like GET.
+        if ($requestMethod === 'HEAD') {
+            $requestMethod = 'GET';
+        }
         $requestPath = $this->getPath();
         
         foreach ($this->routes as $route) {
@@ -81,9 +85,16 @@ class Router {
         
         // Remove query string
         $path = strtok($path, '?');
-        
+
         // Ensure path starts with /
-        return '/' . ltrim($path, '/');
+        $path = '/' . ltrim($path, '/');
+
+        // Normalize trailing slash (except root)
+        if ($path !== '/') {
+            $path = rtrim($path, '/');
+        }
+
+        return $path;
     }
     
     /**

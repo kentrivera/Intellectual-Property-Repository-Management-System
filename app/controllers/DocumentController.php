@@ -479,6 +479,12 @@ class DocumentController extends Controller {
             $files = $this->documentFileModel->getFilesByFolder($folderId, $options);
             $stats = $this->documentFileModel->getStatistics($folderId);
 
+            // Also return subfolders for this location
+            $folders = $this->folderModel->getSubFolders($folderId);
+            if (is_array($stats)) {
+                $stats['subfolder_count'] = count($folders);
+            }
+
             // Get folder information if specified
             $folderInfo = null;
             if ($folderId) {
@@ -489,6 +495,7 @@ class DocumentController extends Controller {
             $this->json([
                 'success' => true,
                 'files' => $files,
+                'folders' => $folders,
                 'folder' => $folderInfo,
                 'stats' => $stats,
                 'pagination' => [
@@ -602,6 +609,64 @@ class DocumentController extends Controller {
     }
 
     /**
+     * Restore a deleted file from the folder-based file manager (document_files)
+     */
+    public function restoreFile() {
+        $this->requireAdmin();
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->json(['success' => false, 'message' => 'Invalid request method']);
+            return;
+        }
+
+        try {
+            $fileId = (int)($_POST['file_id'] ?? 0);
+            if ($fileId <= 0) {
+                $this->json(['success' => false, 'message' => 'Invalid file id']);
+                return;
+            }
+
+            $file = $this->documentFileModel->findById($fileId, true);
+            if (!$file || !(int)($file['is_deleted'] ?? 0)) {
+                $this->json(['success' => false, 'message' => 'File not found in trash']);
+                return;
+            }
+
+            $ok = $this->documentFileModel->restore($fileId);
+            $this->json(['success' => (bool)$ok, 'message' => $ok ? 'File restored successfully' : 'Failed to restore file']);
+        } catch (Exception $e) {
+            error_log('File restore error: ' . $e->getMessage());
+            $this->json(['success' => false, 'message' => 'Restore failed']);
+        }
+    }
+
+    /**
+     * Permanently delete a file from the folder-based file manager (document_files)
+     */
+    public function permanentDeleteFile() {
+        $this->requireAdmin();
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->json(['success' => false, 'message' => 'Invalid request method']);
+            return;
+        }
+
+        try {
+            $fileId = (int)($_POST['file_id'] ?? 0);
+            if ($fileId <= 0) {
+                $this->json(['success' => false, 'message' => 'Invalid file id']);
+                return;
+            }
+
+            $ok = $this->documentFileModel->permanentDelete($fileId);
+            $this->json(['success' => (bool)$ok, 'message' => $ok ? 'File permanently deleted' : 'Failed to permanently delete file']);
+        } catch (Exception $e) {
+            error_log('File permanent delete error: ' . $e->getMessage());
+            $this->json(['success' => false, 'message' => 'Delete failed']);
+        }
+    }
+
+    /**
      * Search files
      */
     public function searchFiles() {
@@ -634,6 +699,64 @@ class DocumentController extends Controller {
         } catch (Exception $e) {
             error_log("File search error: " . $e->getMessage());
             $this->json(['success' => false, 'message' => 'Search failed']);
+        }
+    }
+
+    /**
+     * Download a file from the folder-based file manager (document_files)
+     */
+    public function downloadFile() {
+        try {
+            $fileId = (int)($_GET['id'] ?? 0);
+            if ($fileId <= 0) {
+                http_response_code(400);
+                echo 'Missing file id';
+                return;
+            }
+
+            $file = $this->documentFileModel->findById($fileId);
+            if (!$file) {
+                http_response_code(404);
+                echo 'File not found';
+                return;
+            }
+
+            if (!$this->canDownloadFile($file)) {
+                http_response_code(403);
+                echo 'Forbidden';
+                return;
+            }
+
+            if (empty($file['file_path']) || !file_exists($file['file_path'])) {
+                http_response_code(404);
+                echo 'Physical file not found';
+                return;
+            }
+
+            // Update analytics
+            try {
+                $this->documentFileModel->updateLastAccessed($fileId);
+            } catch (Exception $e) {
+                // Non-fatal
+            }
+
+            $downloadName = $file['original_name'] ?? basename($file['file_path']);
+            $mimeType = $file['mime_type'] ?? 'application/octet-stream';
+            $fileSize = $file['file_size'] ?? filesize($file['file_path']);
+
+            header('Content-Type: ' . $mimeType);
+            header('Content-Disposition: attachment; filename="' . addslashes($downloadName) . '"');
+            if ($fileSize) {
+                header('Content-Length: ' . $fileSize);
+            }
+
+            readfile($file['file_path']);
+            exit;
+
+        } catch (Exception $e) {
+            error_log('Download file error: ' . $e->getMessage());
+            http_response_code(500);
+            echo 'Download failed';
         }
     }
 
