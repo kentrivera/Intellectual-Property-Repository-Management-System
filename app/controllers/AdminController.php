@@ -454,6 +454,128 @@ class AdminController extends Controller {
     }
 
     /**
+     * Serve a trashed file for inline preview or download.
+     * Supports:
+     * - type=document (ip_documents)
+     * - type=file (document_files)
+     */
+    public function serveTrashFile() {
+        $this->requireAdmin();
+
+        $type = (string)($_GET['type'] ?? '');
+        $id = (int)($_GET['id'] ?? 0);
+        $download = isset($_GET['download']) && (string)$_GET['download'] === '1';
+        $inline = !$download;
+
+        if ($id <= 0) {
+            http_response_code(400);
+            echo 'Missing id';
+            return;
+        }
+
+        $filePath = '';
+        $downloadName = 'file';
+        $mimeType = 'application/octet-stream';
+        $fileSize = 0;
+
+        if ($type === 'file') {
+            if (!$this->documentFileModel || !method_exists($this->documentFileModel, 'findById')) {
+                http_response_code(404);
+                echo 'File system not available';
+                return;
+            }
+
+            $file = $this->documentFileModel->findById($id, true);
+            if (!$file) {
+                http_response_code(404);
+                echo 'File not found';
+                return;
+            }
+
+            $filePath = (string)($file['file_path'] ?? '');
+            $downloadName = (string)($file['original_name'] ?? $file['file_name'] ?? basename($filePath) ?? 'file');
+            $mimeType = (string)($file['mime_type'] ?? 'application/octet-stream');
+            $fileSize = (int)($file['file_size'] ?? 0);
+
+        } elseif ($type === 'document') {
+            $doc = $this->documentModel->findById($id, true);
+            if (!$doc) {
+                http_response_code(404);
+                echo 'Document not found';
+                return;
+            }
+
+            $filePath = (string)($doc['file_path'] ?? '');
+            $downloadName = (string)($doc['original_name'] ?? $doc['file_name'] ?? basename($filePath) ?? 'document');
+
+            // Try to derive mime from extension if stored type is not a mime
+            $ext = strtolower((string)($doc['file_type'] ?? ''));
+            $mimeMap = [
+                'pdf' => 'application/pdf',
+                'png' => 'image/png',
+                'jpg' => 'image/jpeg',
+                'jpeg' => 'image/jpeg',
+                'gif' => 'image/gif',
+                'txt' => 'text/plain',
+                'csv' => 'text/csv',
+                'doc' => 'application/msword',
+                'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'xls' => 'application/vnd.ms-excel',
+                'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            ];
+            $mimeType = $mimeMap[$ext] ?? 'application/octet-stream';
+            $fileSize = (int)($doc['file_size'] ?? 0);
+        } else {
+            http_response_code(400);
+            echo 'Invalid type';
+            return;
+        }
+
+        // Fallback: some deletes move files into TRASH_PATH using basename
+        $effectivePath = $filePath;
+        if ($effectivePath && !file_exists($effectivePath) && defined('TRASH_PATH')) {
+            $candidate = rtrim(TRASH_PATH, '/\\') . DIRECTORY_SEPARATOR . basename($effectivePath);
+            if (file_exists($candidate)) {
+                $effectivePath = $candidate;
+            }
+        }
+
+        if (!$effectivePath || !file_exists($effectivePath)) {
+            http_response_code(404);
+            echo 'Physical file not found';
+            return;
+        }
+
+        // Prefer finfo when available
+        if (function_exists('finfo_open')) {
+            $finfo = @finfo_open(FILEINFO_MIME_TYPE);
+            if ($finfo) {
+                $detected = @finfo_file($finfo, $effectivePath);
+                if (is_string($detected) && $detected) {
+                    $mimeType = $detected;
+                }
+                @finfo_close($finfo);
+            }
+        }
+
+        if (!$fileSize) {
+            $fileSize = (int)@filesize($effectivePath);
+        }
+
+        header('Content-Type: ' . $mimeType);
+        header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . '; filename="' . addslashes($downloadName) . '"');
+        header('X-Content-Type-Options: nosniff');
+        header('Cache-Control: private, max-age=0, no-cache, no-store, must-revalidate');
+        header('Pragma: no-cache');
+        if ($fileSize) {
+            header('Content-Length: ' . $fileSize);
+        }
+
+        readfile($effectivePath);
+        exit;
+    }
+
+    /**
      * Empty Trash Bin (permanent delete everything in trash)
      */
     public function emptyTrash() {

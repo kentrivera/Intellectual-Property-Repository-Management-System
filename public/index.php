@@ -61,6 +61,7 @@ $router->post('/admin/download-requests/reject', 'AdminController@rejectRequest'
 
 $router->get('/admin/trash', 'AdminController@trashBin');
 $router->post('/admin/trash/empty', 'AdminController@emptyTrash');
+$router->get('/admin/trash/serve', 'AdminController@serveTrashFile');
 $router->get('/admin/activity-logs', 'AdminController@activityLogs');
 
 // =====================
