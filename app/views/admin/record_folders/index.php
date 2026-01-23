@@ -121,7 +121,7 @@
 </head>
 <body class="bg-white min-h-screen">
     <!-- Header - Google Drive Style -->
-    <header class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
+    <header class="bg-white border-b border-gray-200 shadow-sm sticky z-30" style="top: var(--app-header-height, 0px);">
         <div class="px-3 sm:px-4 py-2">
             <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center space-x-2 sm:space-x-3 flex-shrink-0">
@@ -357,6 +357,10 @@
                 <button onclick="hidePreviewModal()" class="drive-button text-gray-600 hover:bg-gray-100">
                     Close
                 </button>
+                <button onclick="requestDownloadFromPreview()" id="previewRequestBtn" class="drive-button bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-1.5 hidden">
+                    <i class="fas fa-paper-plane text-xs"></i>
+                    <span>Request download</span>
+                </button>
                 <button onclick="downloadFileFromPreview()" id="previewDownloadBtn" class="drive-button bg-green-600 text-white hover:bg-green-700 flex items-center gap-1.5">
                     <i class="fas fa-download text-xs"></i>
                     <span>Download</span>
@@ -373,6 +377,6 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=<?= @filemtime(__DIR__ . '/app.js') ?: '1' ?>"></script>
 </body>
 </html>

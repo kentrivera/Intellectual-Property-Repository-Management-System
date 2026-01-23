@@ -1,6 +1,7 @@
 <?php
 ob_start();
 $page_title = 'Folder Repository';
+$recordFoldersReadOnly = $recordFoldersReadOnly ?? (($_SESSION['role'] ?? '') !== 'admin');
 ?>
 
 <style>
@@ -117,7 +118,7 @@ $page_title = 'Folder Repository';
 
 <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
     <!-- Header - Google Drive Style -->
-    <header class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
+    <header class="bg-white border-b border-gray-200 shadow-sm sticky z-30" style="top: var(--app-header-height, 0px);">
         <div class="px-3 sm:px-4 py-2">
             <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center space-x-2 sm:space-x-3 flex-shrink-0">
@@ -192,7 +193,8 @@ $page_title = 'Folder Repository';
                             </h2>
                         </div>
                         
-                        <!-- Action Buttons -->
+                        <!-- Action Buttons (admin only) -->
+                        <?php if (!$recordFoldersReadOnly): ?>
                         <div class="flex items-center gap-1">
                             <button onclick="showCreateFolderModal()" class="drive-button bg-green-600 text-white hover:bg-green-700 transition flex items-center gap-1.5" title="New Folder">
                                 <i class="fas fa-folder-plus text-xs"></i>
@@ -218,6 +220,7 @@ $page_title = 'Folder Repository';
                                 </button>
                             </div>
                         </div>
+                        <?php endif; ?>
                     </div>
 
                     <nav id="breadcrumb" class="flex items-center text-xs text-gray-600 bg-gray-50 px-2 py-1.5 rounded mb-3 overflow-x-auto"></nav>
@@ -335,7 +338,11 @@ $page_title = 'Folder Repository';
             <div class="flex-1 overflow-auto p-4" id="previewContent"></div>
             <div class="flex justify-end gap-2 px-4 py-3 border-t border-gray-200 bg-gray-50">
                 <button onclick="hidePreviewModal()" class="drive-button text-gray-600 hover:bg-gray-100">Close</button>
-                <button onclick="downloadFileFromPreview()" id="previewDownloadBtn" class="drive-button bg-green-600 text-white hover:bg-green-700 flex items-center gap-1.5">
+                <button onclick="requestDownloadFromPreview()" id="previewRequestBtn" class="drive-button bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-1.5 <?php echo $recordFoldersReadOnly ? '' : 'hidden'; ?>">
+                    <i class="fas fa-paper-plane text-xs"></i>
+                    <span>Request download</span>
+                </button>
+                <button onclick="downloadFileFromPreview()" id="previewDownloadBtn" class="drive-button bg-green-600 text-white hover:bg-green-700 flex items-center gap-1.5 <?php echo $recordFoldersReadOnly ? 'hidden' : ''; ?>">
                     <i class="fas fa-download text-xs"></i>
                     <span>Download</span>
                 </button>
@@ -352,7 +359,10 @@ $page_title = 'Folder Repository';
     </div>
 </div>
 
-<script src="<?= BASE_URL ?>/js/record-folders/app.js"></script>
+<script>
+    window.RECORD_FOLDERS_READ_ONLY = <?= $recordFoldersReadOnly ? 'true' : 'false' ?>;
+</script>
+<script src="<?= BASE_URL ?>/js/record-folders/app.js?v=<?= @filemtime(dirname(__DIR__, 3) . '/public/js/record-folders/app.js') ?: '1' ?>"></script>
 <?php
 $content = ob_get_clean();
 require_once APP_PATH . '/views/layouts/main.php';

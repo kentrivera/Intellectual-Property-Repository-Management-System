@@ -6,6 +6,22 @@ let navigationHistory = [];
 let allFolders = [];
 let currentParentId = null;
 
+// Staff mode is read-only by default.
+const RECORD_FOLDERS_READ_ONLY = (() => {
+    try {
+        if (typeof window !== 'undefined' && typeof window.RECORD_FOLDERS_READ_ONLY !== 'undefined') {
+            return !!window.RECORD_FOLDERS_READ_ONLY;
+        }
+    } catch (e) {
+        // ignore
+    }
+    try {
+        return typeof location !== 'undefined' && location.pathname.startsWith('/staff/');
+    } catch (e) {
+        return false;
+    }
+})();
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     loadContent(0);
@@ -181,14 +197,7 @@ async function loadFolders(parentId) {
                 contentInfo = `<span class="text-xs text-gray-500 flex items-center gap-2">${parts.join('<span>•</span>')}</span>`;
             }
             
-            folderEl.innerHTML = `
-                <div class=\"flex items-center space-x-2.5 flex-1 min-w-0\" onclick=\"loadContent(${folder.id})\">
-                    <i class=\"fas fa-folder text-yellow-500 group-hover:text-yellow-600 text-xl transition-colors duration-200 flex-shrink-0\"></i>
-                    <div class=\"flex flex-col min-w-0 flex-1\">
-                        <span class=\"text-gray-800 group-hover:text-gray-900 font-semibold text-sm truncate transition-colors duration-200\">${escapeHtml(folder.name)}</span>
-                        ${contentInfo}
-                    </div>
-                </div>
+            const folderActionButtons = RECORD_FOLDERS_READ_ONLY ? '' : `
                 <div class=\"flex items-center space-x-1.5 opacity-60 group-hover:opacity-100 transition-opacity duration-200\">
                     <button onclick=\"event.stopPropagation(); showEditFolderModal(${folder.id}, '${escapeHtml(folder.name)}')\" class=\"text-blue-600 hover:text-blue-700 hover:bg-blue-100 p-1.5 rounded transition-all duration-200\" title=\"Edit\">
                         <i class=\"fas fa-edit text-sm\"></i>
@@ -197,6 +206,17 @@ async function loadFolders(parentId) {
                         <i class=\"fas fa-trash text-sm\"></i>
                     </button>
                 </div>
+            `;
+
+            folderEl.innerHTML = `
+                <div class=\"flex items-center space-x-2.5 flex-1 min-w-0\" onclick=\"loadContent(${folder.id})\">
+                    <i class=\"fas fa-folder text-yellow-500 group-hover:text-yellow-600 text-xl transition-colors duration-200 flex-shrink-0\"></i>
+                    <div class=\"flex flex-col min-w-0 flex-1\">
+                        <span class=\"text-gray-800 group-hover:text-gray-900 font-semibold text-sm truncate transition-colors duration-200\">${escapeHtml(folder.name)}</span>
+                        ${contentInfo}
+                    </div>
+                </div>
+                ${folderActionButtons}
             `;
             
             foldersListEl.appendChild(folderEl);
@@ -238,6 +258,17 @@ async function loadFiles(folderId) {
                 const fileCount = parseInt(folder.file_count) || 0;
                 const totalItems = subfolderCount + fileCount;
                 
+                const folderMenuItems = RECORD_FOLDERS_READ_ONLY ? '' : `
+                            <button onclick=\"event.stopPropagation(); showEditFolderModal(${folder.id}, '${escapeHtml(folder.name)}'); closeAllMenus()\" class=\"w-full text-left px-3 py-2 hover:bg-gray-100 transition text-gray-700 flex items-center gap-2\">
+                                <i class=\"fas fa-edit text-blue-600 w-3\"></i>
+                                <span>Rename</span>
+                            </button>
+                            <button onclick=\"event.stopPropagation(); deleteFolder(${folder.id}); closeAllMenus()\" class=\"w-full text-left px-3 py-2 hover:bg-gray-100 transition text-gray-700 flex items-center gap-2\">
+                                <i class=\"fas fa-trash text-red-600 w-3\"></i>
+                                <span>Delete</span>
+                            </button>
+                `;
+
                 folderEl.innerHTML = `
                     <div class="flex items-center gap-3 flex-1 min-w-0" onclick="loadContent(${folder.id})">
                         <i class="fas fa-folder text-green-600 text-base flex-shrink-0"></i>
@@ -257,14 +288,7 @@ async function loadFiles(folderId) {
                                 <i class="fas fa-arrow-right text-green-600 w-3"></i>
                                 <span>Open</span>
                             </button>
-                            <button onclick="event.stopPropagation(); showEditFolderModal(${folder.id}, '${escapeHtml(folder.name)}'); closeAllMenus()" class="w-full text-left px-3 py-2 hover:bg-gray-100 transition text-gray-700 flex items-center gap-2">
-                                <i class="fas fa-edit text-blue-600 w-3"></i>
-                                <span>Rename</span>
-                            </button>
-                            <button onclick="event.stopPropagation(); deleteFolder(${folder.id}); closeAllMenus()" class="w-full text-left px-3 py-2 hover:bg-gray-100 transition text-gray-700 flex items-center gap-2">
-                                <i class="fas fa-trash text-red-600 w-3"></i>
-                                <span>Delete</span>
-                            </button>
+                            ${folderMenuItems}
                         </div>
                     </div>
                 `;
@@ -282,8 +306,33 @@ async function loadFiles(folderId) {
             const formattedSize = formatBytes(file.file_size);
             const formattedDate = formatDate(file.created_at);
             
+            const fileDownloadMenuItem = RECORD_FOLDERS_READ_ONLY
+                ? `
+                        <button onclick=\"event.stopPropagation(); requestDownloadForFile(${file.id}, '${escapeHtml(file.original_name)}', ${file.ip_document_id || 0}); closeAllMenus()\" class=\"w-full text-left px-3 py-2 hover:bg-gray-100 transition text-gray-700 flex items-center gap-2\">
+                            <i class=\"fas fa-paper-plane text-green-600 w-3\"></i>
+                            <span>Request download</span>
+                        </button>
+                  `
+                : `
+                        <button onclick=\"event.stopPropagation(); downloadFile(${file.id}); closeAllMenus()\" class=\"w-full text-left px-3 py-2 hover:bg-gray-100 transition text-gray-700 flex items-center gap-2\">
+                            <i class=\"fas fa-download text-green-600 w-3\"></i>
+                            <span>Download</span>
+                        </button>
+                  `;
+
+            const fileWriteMenuItems = RECORD_FOLDERS_READ_ONLY ? '' : `
+                        <button onclick=\"event.stopPropagation(); showEditFileModal(${file.id}, '${escapeHtml(file.original_name)}', '${escapeHtml(file.description || '')}'); closeAllMenus()\" class=\"w-full text-left px-3 py-2 hover:bg-gray-100 transition text-gray-700 flex items-center gap-2\">
+                            <i class=\"fas fa-edit text-blue-600 w-3\"></i>
+                            <span>Rename</span>
+                        </button>
+                        <button onclick=\"event.stopPropagation(); deleteFile(${file.id}); closeAllMenus()\" class=\"w-full text-left px-3 py-2 hover:bg-gray-100 transition text-gray-700 flex items-center gap-2\">
+                            <i class=\"fas fa-trash text-red-600 w-3\"></i>
+                            <span>Delete</span>
+                        </button>
+            `;
+
             fileEl.innerHTML = `
-                <div class="flex items-center gap-3 flex-1 min-w-0" onclick="previewFile(${file.id}, '${escapeHtml(file.original_name)}', '${file.file_type}', ${file.file_size})">
+                <div class="flex items-center gap-3 flex-1 min-w-0" onclick="previewFile(${file.id}, '${escapeHtml(file.original_name)}', '${file.file_type}', ${file.file_size}, ${file.ip_document_id || 0})">
                     <i class="${icon} text-base flex-shrink-0"></i>
                     <div class="flex-1 min-w-0">
                         <div class="text-sm text-gray-800 truncate">${escapeHtml(file.original_name)}</div>
@@ -295,22 +344,12 @@ async function loadFiles(folderId) {
                         <i class="fas fa-ellipsis-v text-xs"></i>
                     </button>
                     <div class="item-menu hidden absolute right-0 mt-1 w-40 bg-white rounded shadow-lg border border-gray-200 z-50 py-1 text-xs">
-                        <button onclick="event.stopPropagation(); previewFile(${file.id}, '${escapeHtml(file.original_name)}', '${file.file_type}', ${file.file_size}); closeAllMenus()" class="w-full text-left px-3 py-2 hover:bg-gray-100 transition text-gray-700 flex items-center gap-2">
+                        <button onclick="event.stopPropagation(); previewFile(${file.id}, '${escapeHtml(file.original_name)}', '${file.file_type}', ${file.file_size}, ${file.ip_document_id || 0}); closeAllMenus()" class="w-full text-left px-3 py-2 hover:bg-gray-100 transition text-gray-700 flex items-center gap-2">
                             <i class="fas fa-eye text-purple-600 w-3"></i>
                             <span>Preview</span>
                         </button>
-                        <button onclick="event.stopPropagation(); downloadFile(${file.id}); closeAllMenus()" class="w-full text-left px-3 py-2 hover:bg-gray-100 transition text-gray-700 flex items-center gap-2">
-                            <i class="fas fa-download text-green-600 w-3"></i>
-                            <span>Download</span>
-                        </button>
-                        <button onclick="event.stopPropagation(); showEditFileModal(${file.id}, '${escapeHtml(file.original_name)}', '${escapeHtml(file.description || '')}'); closeAllMenus()" class="w-full text-left px-3 py-2 hover:bg-gray-100 transition text-gray-700 flex items-center gap-2">
-                            <i class="fas fa-edit text-blue-600 w-3"></i>
-                            <span>Rename</span>
-                        </button>
-                        <button onclick="event.stopPropagation(); deleteFile(${file.id}); closeAllMenus()" class="w-full text-left px-3 py-2 hover:bg-gray-100 transition text-gray-700 flex items-center gap-2">
-                            <i class="fas fa-trash text-red-600 w-3"></i>
-                            <span>Delete</span>
-                        </button>
+                        ${fileDownloadMenuItem}
+                        ${fileWriteMenuItems}
                     </div>
                 </div>
             `;
@@ -327,9 +366,64 @@ async function loadFiles(folderId) {
     }
 }
 
+async function requestDownloadForFile(documentFileId, originalName, ipDocumentId) {
+    try {
+        const docId = parseInt(ipDocumentId || 0, 10) || 0;
+
+        const { value: reason, isConfirmed } = await Swal.fire({
+            title: 'Request download',
+            html: `<div class="text-left text-sm text-gray-600 mb-2">File: <span class="font-medium text-gray-800">${escapeHtml(originalName || 'File')}</span></div>`,
+            input: 'textarea',
+            inputLabel: 'Reason (optional)',
+            inputPlaceholder: 'Why do you need this file?',
+            inputAttributes: {
+                'aria-label': 'Request reason'
+            },
+            showCancelButton: true,
+            confirmButtonText: 'Submit request',
+            confirmButtonColor: '#16a34a',
+            cancelButtonColor: '#6b7280'
+        });
+
+        if (!isConfirmed) return;
+
+        const formData = new FormData();
+        if (docId > 0) {
+            formData.append('document_id', String(docId));
+        } else {
+            formData.append('document_file_id', String(documentFileId));
+        }
+        formData.append('reason', String(reason || ''));
+        if (typeof CSRF_TOKEN !== 'undefined' && CSRF_TOKEN) {
+            formData.append('csrf_token', CSRF_TOKEN);
+        }
+
+        const url = (typeof BASE_URL !== 'undefined' && BASE_URL)
+            ? `${BASE_URL}/staff/request-download`
+            : '/staff/request-download';
+
+        const res = await fetch(url, { method: 'POST', body: formData });
+        const data = await res.json().catch(() => null);
+
+        if (res.ok && data && data.success) {
+            showNotification(data.message || 'Request submitted', 'success');
+        } else {
+            const msg = (data && data.message) ? data.message : 'Failed to submit request';
+            showNotification(msg, 'error');
+        }
+    } catch (e) {
+        showNotification(e.message || 'Failed to submit request', 'error');
+    }
+}
+
 // Create new folder
 async function createFolder(event) {
     event.preventDefault();
+
+    if (RECORD_FOLDERS_READ_ONLY) {
+        showNotification('Read-only: folder creation is disabled for staff.', 'info');
+        return;
+    }
     
     const folderName = document.getElementById('folderName').value.trim();
     
@@ -378,6 +472,11 @@ async function createFolder(event) {
 // Update folder
 async function updateFolder(event) {
     event.preventDefault();
+
+    if (RECORD_FOLDERS_READ_ONLY) {
+        showNotification('Read-only: renaming folders is disabled for staff.', 'info');
+        return;
+    }
     
     const folderId = document.getElementById('editFolderId').value;
     const folderName = document.getElementById('editFolderName').value.trim();
@@ -425,6 +524,10 @@ async function updateFolder(event) {
 
 // Delete folder
 async function deleteFolder(folderId) {
+    if (RECORD_FOLDERS_READ_ONLY) {
+        showNotification('Read-only: deleting folders is disabled for staff.', 'info');
+        return;
+    }
     const result = await Swal.fire({
         title: 'Delete folder?',
         text: "This will delete the folder and all its contents (subfolders and files). This action cannot be undone.",
@@ -471,6 +574,11 @@ async function deleteFolder(folderId) {
 // Upload file
 async function uploadFile(event) {
     event.preventDefault();
+
+    if (RECORD_FOLDERS_READ_ONLY) {
+        showNotification('Read-only: uploads are disabled for staff.', 'info');
+        return;
+    }
     
     const fileInput = document.getElementById('fileInput');
     const description = document.getElementById('fileDescription').value.trim();
@@ -522,6 +630,11 @@ async function uploadFile(event) {
 // Update file
 async function updateFile(event) {
     event.preventDefault();
+
+    if (RECORD_FOLDERS_READ_ONLY) {
+        showNotification('Read-only: editing files is disabled for staff.', 'info');
+        return;
+    }
     
     const fileId = document.getElementById('editFileId').value;
     const fileName = document.getElementById('editFileName').value.trim();
@@ -571,6 +684,10 @@ async function updateFile(event) {
 
 // Delete file
 async function deleteFile(fileId) {
+    if (RECORD_FOLDERS_READ_ONLY) {
+        showNotification('Read-only: deleting files is disabled for staff.', 'info');
+        return;
+    }
     const result = await Swal.fire({
         title: 'Delete file?',
         text: "This action cannot be undone.",
@@ -616,12 +733,20 @@ async function deleteFile(fileId) {
 
 // Download file
 function downloadFile(fileId) {
+    if (RECORD_FOLDERS_READ_ONLY) {
+        showNotification('Downloads are disabled for staff.', 'info');
+        return;
+    }
     // Open in new window to preview/download
     window.open(`api_files.php?action=view&id=${fileId}`, '_blank');
 }
 
 // Modal functions
 function showCreateFolderModal() {
+    if (RECORD_FOLDERS_READ_ONLY) {
+        showNotification('Read-only: cannot create folders.', 'info');
+        return;
+    }
     document.getElementById('createFolderModal').classList.remove('hidden');
 }
 
@@ -631,6 +756,10 @@ function hideCreateFolderModal() {
 }
 
 function showUploadModal() {
+    if (RECORD_FOLDERS_READ_ONLY) {
+        showNotification('Read-only: cannot upload files.', 'info');
+        return;
+    }
     document.getElementById('uploadModal').classList.remove('hidden');
 }
 
@@ -641,6 +770,10 @@ function hideUploadModal() {
 }
 
 function showEditFileModal(fileId, fileName, description) {
+    if (RECORD_FOLDERS_READ_ONLY) {
+        showNotification('Read-only: cannot edit files.', 'info');
+        return;
+    }
     document.getElementById('editFileId').value = fileId;
     document.getElementById('editFileName').value = fileName;
     document.getElementById('editFileDescription').value = description;
@@ -652,6 +785,10 @@ function hideEditFileModal() {
 }
 
 function showEditFolderModal(folderId, folderName) {
+    if (RECORD_FOLDERS_READ_ONLY) {
+        showNotification('Read-only: cannot rename folders.', 'info');
+        return;
+    }
     document.getElementById('editFolderId').value = folderId;
     document.getElementById('editFolderName').value = folderName;
     document.getElementById('editFolderModal').classList.remove('hidden');
@@ -759,9 +896,18 @@ function showNotification(message, type = 'info') {
 
 // File Preview Functions
 let currentPreviewFileId = null;
+let currentPreviewIpDocumentId = 0;
 
-function previewFile(fileId, fileName, fileType, fileSize) {
+function requestDownloadFromPreview() {
+    const fileId = currentPreviewFileId;
+    if (!fileId) return;
+    const fileName = (document.getElementById('previewFileName')?.textContent || 'File');
+    requestDownloadForFile(fileId, fileName, currentPreviewIpDocumentId);
+}
+
+function previewFile(fileId, fileName, fileType, fileSize, ipDocumentId) {
     currentPreviewFileId = fileId;
+    currentPreviewIpDocumentId = parseInt(ipDocumentId || 0, 10) || 0;
     
     const modal = document.getElementById('previewModal');
     const fileNameEl = document.getElementById('previewFileName');
@@ -778,6 +924,18 @@ function previewFile(fileId, fileName, fileType, fileSize) {
             <span class="ml-3 text-gray-600">Loading preview...</span>
         </div>
     `;
+
+    // Toggle footer buttons (staff = request; admin = download)
+    const requestBtn = document.getElementById('previewRequestBtn');
+    if (requestBtn) {
+        if (RECORD_FOLDERS_READ_ONLY) requestBtn.classList.remove('hidden');
+        else requestBtn.classList.add('hidden');
+    }
+    const dlBtn = document.getElementById('previewDownloadBtn');
+    if (dlBtn) {
+        if (RECORD_FOLDERS_READ_ONLY) dlBtn.classList.add('hidden');
+        else dlBtn.classList.remove('hidden');
+    }
     
     modal.classList.remove('hidden');
     
@@ -894,6 +1052,10 @@ function hidePreviewModal() {
 }
 
 function downloadFileFromPreview() {
+    if (RECORD_FOLDERS_READ_ONLY) {
+        showNotification('Downloads are disabled for staff.', 'info');
+        return;
+    }
     if (currentPreviewFileId) {
         // Force download instead of view
         const link = document.createElement('a');
@@ -1091,7 +1253,102 @@ function isNodeInCurrentPath(nodeId) {
 // Toggle actions menu dropdown
 function toggleActionsMenu() {
     const menu = document.getElementById('actionsMenu');
-    menu.classList.toggle('hidden');
+    const menuBtn = document.getElementById('actionsMenuBtn');
+    if (!menu || !menuBtn) return;
+
+    const willOpen = menu.classList.contains('hidden');
+    if (!willOpen) {
+        menu.classList.add('hidden');
+        resetDropdownStyles(menu);
+        return;
+    }
+
+    // Prepare for measurement/positioning
+    menu.classList.remove('hidden');
+    menu.style.position = 'fixed';
+    menu.style.zIndex = '70';
+    menu.style.visibility = 'hidden';
+    menu.style.left = '0px';
+    menu.style.top = '0px';
+    menu.style.maxHeight = '';
+    menu.style.overflowY = '';
+
+    const margin = 8;
+    const btnRect = menuBtn.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+
+    const spaceBelow = window.innerHeight - btnRect.bottom;
+    const spaceAbove = btnRect.top;
+    // Add a buffer so menus near the bottom (e.g., last/second-to-last row) open upward
+    const buffer = 56;
+    const openUp = spaceBelow < (menuRect.height + buffer) && spaceAbove > spaceBelow;
+
+    const desiredTop = openUp
+        ? (btnRect.top - menuRect.height - margin)
+        : (btnRect.bottom + margin);
+
+    const top = Math.max(
+        margin,
+        Math.min(window.innerHeight - menuRect.height - margin, desiredTop)
+    );
+
+    // Right-align to the button; clamp within viewport.
+    let left = btnRect.right - menuRect.width;
+    left = Math.min(window.innerWidth - menuRect.width - margin, left);
+    left = Math.max(margin, left);
+
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+
+    const availableHeight = openUp
+        ? (btnRect.top - margin)
+        : (window.innerHeight - (btnRect.bottom + margin) - margin);
+
+    if (availableHeight > 120 && menuRect.height > availableHeight) {
+        menu.style.maxHeight = `${Math.max(120, availableHeight)}px`;
+        menu.style.overflowY = 'auto';
+    }
+
+    menu.style.visibility = '';
+}
+
+// Floating (body-attached) menu for per-item actions (prevents clipping in scroll containers)
+let __rfFloatingMenu = null;
+let __rfFloatingMenuAnchorBtn = null;
+
+function ensureFloatingMenu() {
+    if (__rfFloatingMenu) return __rfFloatingMenu;
+
+    const el = document.createElement('div');
+    el.id = 'rfFloatingMenu';
+    el.className = 'rf-floating-menu hidden py-1 text-xs';
+    el.style.position = 'fixed';
+    el.style.left = '0px';
+    el.style.top = '0px';
+    el.style.minWidth = '10rem';
+    el.style.maxWidth = '90vw';
+    el.style.zIndex = '99999';
+    el.style.background = '#ffffff';
+    el.style.border = '1px solid #e5e7eb';
+    el.style.borderRadius = '0.5rem';
+    el.style.boxShadow = '0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1)';
+
+    // Prevent outside-click handler from firing when interacting with the menu
+    el.addEventListener('click', (e) => e.stopPropagation());
+
+    document.body.appendChild(el);
+    __rfFloatingMenu = el;
+    return el;
+}
+
+function hideFloatingMenu() {
+    if (!__rfFloatingMenu) return;
+    __rfFloatingMenu.classList.add('hidden');
+    __rfFloatingMenu.style.left = '0px';
+    __rfFloatingMenu.style.top = '0px';
+    __rfFloatingMenu.style.maxHeight = '';
+    __rfFloatingMenu.style.overflowY = '';
+    __rfFloatingMenuAnchorBtn = null;
 }
 
 // Toggle individual item menu
@@ -1101,8 +1358,57 @@ function toggleItemMenu(button) {
     
     // Toggle this menu
     const menu = button.nextElementSibling;
-    if (menu && menu.classList.contains('item-menu')) {
-        menu.classList.toggle('hidden');
+    if (!menu || !menu.classList.contains('item-menu')) return;
+
+    // Render the menu in a body-attached floating container so it cannot be clipped.
+    const floating = ensureFloatingMenu();
+
+    // If clicking the same anchor while menu is open, close it
+    if (!floating.classList.contains('hidden') && __rfFloatingMenuAnchorBtn === button) {
+        hideFloatingMenu();
+        return;
+    }
+
+    floating.innerHTML = menu.innerHTML;
+    floating.classList.remove('hidden');
+    __rfFloatingMenuAnchorBtn = button;
+
+    // Measure after content injection
+    const margin = 8;
+    const buffer = 56;
+    const btnRect = button.getBoundingClientRect();
+    const menuRect = floating.getBoundingClientRect();
+
+    const spaceBelow = window.innerHeight - btnRect.bottom;
+    const spaceAbove = btnRect.top;
+    const openUp = spaceBelow < (menuRect.height + buffer) && spaceAbove > spaceBelow;
+
+    const desiredTop = openUp
+        ? (btnRect.top - menuRect.height - margin)
+        : (btnRect.bottom + margin);
+
+    const top = Math.max(
+        margin,
+        Math.min(window.innerHeight - menuRect.height - margin, desiredTop)
+    );
+
+    let left = btnRect.right - menuRect.width;
+    left = Math.min(window.innerWidth - menuRect.width - margin, left);
+    left = Math.max(margin, left);
+
+    floating.style.left = `${left}px`;
+    floating.style.top = `${top}px`;
+
+    const availableHeight = openUp
+        ? (btnRect.top - margin)
+        : (window.innerHeight - (btnRect.bottom + margin) - margin);
+
+    if (availableHeight > 120 && menuRect.height > availableHeight) {
+        floating.style.maxHeight = `${Math.max(120, availableHeight)}px`;
+        floating.style.overflowY = 'auto';
+    } else {
+        floating.style.maxHeight = '';
+        floating.style.overflowY = '';
     }
 }
 
@@ -1110,7 +1416,24 @@ function toggleItemMenu(button) {
 function closeAllMenus() {
     document.querySelectorAll('.item-menu').forEach(menu => {
         menu.classList.add('hidden');
+        resetDropdownStyles(menu);
     });
+
+    hideFloatingMenu();
+}
+
+function resetDropdownStyles(menu) {
+    if (!menu) return;
+    menu.style.position = '';
+    menu.style.zIndex = '';
+    menu.style.left = '';
+    menu.style.top = '';
+    menu.style.bottom = '';
+    menu.style.marginTop = '';
+    menu.style.marginBottom = '';
+    menu.style.maxHeight = '';
+    menu.style.overflowY = '';
+    menu.style.visibility = '';
 }
 
 // Close menu when clicking outside
@@ -1120,13 +1443,33 @@ document.addEventListener('click', function(event) {
     
     if (menu && menuBtn && !menu.contains(event.target) && !menuBtn.contains(event.target)) {
         menu.classList.add('hidden');
+        resetDropdownStyles(menu);
     }
     
-    // Close item menus if clicking outside
-    if (!event.target.closest('.relative')) {
+    // Close item menus if clicking outside buttons/menus
+    if (!event.target.closest('.relative') && !event.target.closest('.rf-floating-menu')) {
         closeAllMenus();
     }
 });
+
+// Close menus on scroll/resize to avoid overlap at edges
+window.addEventListener('resize', () => {
+    const menu = document.getElementById('actionsMenu');
+    if (menu) {
+        menu.classList.add('hidden');
+        resetDropdownStyles(menu);
+    }
+    closeAllMenus();
+});
+
+window.addEventListener('scroll', () => {
+    const menu = document.getElementById('actionsMenu');
+    if (menu) {
+        menu.classList.add('hidden');
+        resetDropdownStyles(menu);
+    }
+    closeAllMenus();
+}, true);
 
 // Folder tree search functionality
 function filterFolderTree(searchTerm) {
@@ -1428,6 +1771,28 @@ function createSearchFileItem(file) {
     const fileSize = formatBytes(file.file_size);
     const folderLocation = file.folder_name ? `in ${escapeHtml(file.folder_name)}` : 'in Root';
     
+    const ipDocId = file.ip_document_id || 0;
+    const previewBtn = `
+            <button onclick="event.stopPropagation(); previewFile(${file.id}, '${escapeHtml(file.original_name)}', '${file.file_type}', ${file.file_size}, ${ipDocId})" class="drive-icon-btn text-gray-600 hover:text-green-600" title="Preview">
+                <i class="fas fa-eye text-xs"></i>
+            </button>
+    `;
+
+    const actionBtns = RECORD_FOLDERS_READ_ONLY
+        ? `
+            <button onclick="event.stopPropagation(); requestDownloadForFile(${file.id}, '${escapeHtml(file.original_name)}', ${ipDocId})" class="drive-icon-btn text-gray-600 hover:text-green-600" title="Request download">
+                <i class="fas fa-paper-plane text-xs"></i>
+            </button>
+        `
+        : `
+            <button onclick="event.stopPropagation(); downloadFile(${file.id})" class="drive-icon-btn text-gray-600 hover:text-green-600" title="Download">
+                <i class="fas fa-download text-xs"></i>
+            </button>
+            <button onclick="event.stopPropagation(); deleteFile(${file.id})" class="drive-icon-btn text-gray-600 hover:text-red-600" title="Delete">
+                <i class="fas fa-trash text-xs"></i>
+            </button>
+        `;
+
     div.innerHTML = `
         <div class="flex items-center gap-3 flex-1 min-w-0">
             <i class="${fileIcon} text-base flex-shrink-0"></i>
@@ -1437,15 +1802,8 @@ function createSearchFileItem(file) {
             </div>
         </div>
         <div class="flex items-center gap-1 flex-shrink-0">
-            <button onclick="event.stopPropagation(); previewFile(${file.id}, '${escapeHtml(file.original_name)}', '${file.file_type}', ${file.file_size})" class="drive-icon-btn text-gray-600 hover:text-green-600" title="Preview">
-                <i class="fas fa-eye text-xs"></i>
-            </button>
-            <button onclick="event.stopPropagation(); downloadFile(${file.id})" class="drive-icon-btn text-gray-600 hover:text-green-600" title="Download">
-                <i class="fas fa-download text-xs"></i>
-            </button>
-            <button onclick="event.stopPropagation(); deleteFile(${file.id})" class="drive-icon-btn text-gray-600 hover:text-red-600" title="Delete">
-                <i class="fas fa-trash text-xs"></i>
-            </button>
+            ${previewBtn}
+            ${actionBtns}
         </div>
     `;
     

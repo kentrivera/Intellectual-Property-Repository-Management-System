@@ -433,6 +433,9 @@ $totalTrash = count($allTrashedItems);
     }
 </style>
 
+<!-- Shared helpers (ajaxRequest, showToast, etc.) -->
+<script src="<?= BASE_URL ?>/js/common.js?v=<?= filemtime(PUBLIC_PATH . '/js/common.js') ?>"></script>
+
 <script>
     // Global state
     let currentFilter = 'all';
@@ -949,7 +952,8 @@ $totalTrash = count($allTrashedItems);
                 // Restore documents
                 for (const id of items.document) {
                     try {
-                        await ajaxRequest('<?= BASE_URL ?>/document/restore', { document_id: id }, 'POST');
+                        const res = await ajaxRequest('<?= BASE_URL ?>/document/restore', { document_id: id }, 'POST');
+                        if (!res || res.success !== true) throw new Error(res?.message || 'Failed to restore document');
                         successCount++;
                     } catch (e) {
                         errorCount++;
@@ -959,7 +963,8 @@ $totalTrash = count($allTrashedItems);
                 // Restore records
                 for (const id of items.record) {
                     try {
-                        await ajaxRequest('<?= BASE_URL ?>/ip-record/restore', { record_id: id }, 'POST');
+                        const res = await ajaxRequest('<?= BASE_URL ?>/ip-record/restore', { record_id: id }, 'POST');
+                        if (!res || res.success !== true) throw new Error(res?.message || 'Failed to restore record');
                         successCount++;
                     } catch (e) {
                         errorCount++;
@@ -969,7 +974,8 @@ $totalTrash = count($allTrashedItems);
                 // Restore folders
                 for (const id of items.folder) {
                     try {
-                        await ajaxRequest('<?= BASE_URL ?>/admin/folders/restore', { id: id }, 'POST');
+                        const res = await ajaxRequest('<?= BASE_URL ?>/admin/folders/restore', { id: id }, 'POST');
+                        if (!res || res.success !== true) throw new Error(res?.message || 'Failed to restore folder');
                         successCount++;
                     } catch (e) {
                         errorCount++;
@@ -979,7 +985,8 @@ $totalTrash = count($allTrashedItems);
                 // Restore files
                 for (const id of items.file) {
                     try {
-                        await ajaxRequest('<?= BASE_URL ?>/document-file/restore', { file_id: id }, 'POST');
+                        const res = await ajaxRequest('<?= BASE_URL ?>/document-file/restore', { file_id: id }, 'POST');
+                        if (!res || res.success !== true) throw new Error(res?.message || 'Failed to restore file');
                         successCount++;
                     } catch (e) {
                         errorCount++;
@@ -1037,7 +1044,8 @@ $totalTrash = count($allTrashedItems);
                 // Delete documents
                 for (const id of items.document) {
                     try {
-                        await ajaxRequest('<?= BASE_URL ?>/document/permanent-delete', { document_id: id }, 'POST');
+                        const res = await ajaxRequest('<?= BASE_URL ?>/document/permanent-delete', { document_id: id }, 'POST');
+                        if (!res || res.success !== true) throw new Error(res?.message || 'Failed to delete document');
                         successCount++;
                     } catch (e) {
                         errorCount++;
@@ -1047,7 +1055,8 @@ $totalTrash = count($allTrashedItems);
                 // Delete records
                 for (const id of items.record) {
                     try {
-                        await ajaxRequest('<?= BASE_URL ?>/ip-record/permanent-delete', { record_id: id }, 'POST');
+                        const res = await ajaxRequest('<?= BASE_URL ?>/ip-record/permanent-delete', { record_id: id }, 'POST');
+                        if (!res || res.success !== true) throw new Error(res?.message || 'Failed to delete record');
                         successCount++;
                     } catch (e) {
                         errorCount++;
@@ -1057,7 +1066,8 @@ $totalTrash = count($allTrashedItems);
                 // Delete folders
                 for (const id of items.folder) {
                     try {
-                        await ajaxRequest('<?= BASE_URL ?>/admin/folders/permanent-delete', { id: id }, 'POST');
+                        const res = await ajaxRequest('<?= BASE_URL ?>/admin/folders/permanent-delete', { id: id }, 'POST');
+                        if (!res || res.success !== true) throw new Error(res?.message || 'Failed to delete folder');
                         successCount++;
                     } catch (e) {
                         errorCount++;
@@ -1067,7 +1077,8 @@ $totalTrash = count($allTrashedItems);
                 // Delete files
                 for (const id of items.file) {
                     try {
-                        await ajaxRequest('<?= BASE_URL ?>/document-file/permanent-delete', { file_id: id }, 'POST');
+                        const res = await ajaxRequest('<?= BASE_URL ?>/document-file/permanent-delete', { file_id: id }, 'POST');
+                        if (!res || res.success !== true) throw new Error(res?.message || 'Failed to delete file');
                         successCount++;
                     } catch (e) {
                         errorCount++;
@@ -1099,9 +1110,13 @@ $totalTrash = count($allTrashedItems);
         }).then((result) => {
             if (result.isConfirmed) {
                 ajaxRequest('<?= BASE_URL ?>/document/restore', { document_id: id }, 'POST')
-                    .then(() => {
-                        showToast('Document restored successfully', 'success');
-                        setTimeout(() => location.reload(), 1000);
+                    .then((res) => {
+                        if (!res || res.success !== true) throw new Error(res?.message || 'Failed to restore document');
+                        showToast(res.message || 'Document restored successfully', 'success');
+                        setTimeout(() => location.reload(), 800);
+                    })
+                    .catch((e) => {
+                        showToast(e?.message || 'Failed to restore document', 'error');
                     });
             }
         });
@@ -1118,9 +1133,13 @@ $totalTrash = count($allTrashedItems);
         }).then((result) => {
             if (result.isConfirmed) {
                 ajaxRequest('<?= BASE_URL ?>/ip-record/restore', { record_id: id }, 'POST')
-                    .then(() => {
-                        showToast('IP Record restored successfully', 'success');
-                        setTimeout(() => location.reload(), 1000);
+                    .then((res) => {
+                        if (!res || res.success !== true) throw new Error(res?.message || 'Failed to restore IP record');
+                        showToast(res.message || 'IP Record restored successfully', 'success');
+                        setTimeout(() => location.reload(), 800);
+                    })
+                    .catch((e) => {
+                        showToast(e?.message || 'Failed to restore IP record', 'error');
                     });
             }
         });
@@ -1143,9 +1162,13 @@ $totalTrash = count($allTrashedItems);
                 const param = type === 'document' ? 'document_id' : 'record_id';
 
                 ajaxRequest('<?= BASE_URL ?>' + endpoint, { [param]: id }, 'POST')
-                    .then(() => {
-                        showToast(type.charAt(0).toUpperCase() + type.slice(1) + ' deleted permanently', 'success');
-                        setTimeout(() => location.reload(), 1000);
+                    .then((res) => {
+                        if (!res || res.success !== true) throw new Error(res?.message || 'Failed to delete');
+                        showToast(res.message || (type.charAt(0).toUpperCase() + type.slice(1) + ' deleted permanently'), 'success');
+                        setTimeout(() => location.reload(), 800);
+                    })
+                    .catch((e) => {
+                        showToast(e?.message || 'Failed to delete', 'error');
                     });
             } else if (result.isConfirmed && !result.value) {
                 Swal.fire('Checkbox Required', 'Please confirm by checking the box', 'warning');
@@ -1164,9 +1187,13 @@ $totalTrash = count($allTrashedItems);
         }).then((result) => {
             if (result.isConfirmed) {
                 ajaxRequest('<?= BASE_URL ?>/admin/folders/restore', { id: id }, 'POST')
-                    .then(() => {
-                        showToast('Folder restored successfully', 'success');
-                        setTimeout(() => location.reload(), 1000);
+                    .then((res) => {
+                        if (!res || res.success !== true) throw new Error(res?.message || 'Failed to restore folder');
+                        showToast(res.message || 'Folder restored successfully', 'success');
+                        setTimeout(() => location.reload(), 800);
+                    })
+                    .catch((e) => {
+                        showToast(e?.message || 'Failed to restore folder', 'error');
                     });
             }
         });
@@ -1186,9 +1213,13 @@ $totalTrash = count($allTrashedItems);
         }).then((result) => {
             if (result.isConfirmed && result.value) {
                 ajaxRequest('<?= BASE_URL ?>/admin/folders/permanent-delete', { id: id }, 'POST')
-                    .then(() => {
-                        showToast('Folder deleted permanently', 'success');
-                        setTimeout(() => location.reload(), 1000);
+                    .then((res) => {
+                        if (!res || res.success !== true) throw new Error(res?.message || 'Failed to delete folder');
+                        showToast(res.message || 'Folder deleted permanently', 'success');
+                        setTimeout(() => location.reload(), 800);
+                    })
+                    .catch((e) => {
+                        showToast(e?.message || 'Failed to delete folder', 'error');
                     });
             } else if (result.isConfirmed && !result.value) {
                 Swal.fire('Checkbox Required', 'Please confirm by checking the box', 'warning');
@@ -1207,9 +1238,13 @@ $totalTrash = count($allTrashedItems);
         }).then((result) => {
             if (result.isConfirmed) {
                 ajaxRequest('<?= BASE_URL ?>/document-file/restore', { file_id: id }, 'POST')
-                    .then(() => {
-                        showToast('File restored successfully', 'success');
-                        setTimeout(() => location.reload(), 1000);
+                    .then((res) => {
+                        if (!res || res.success !== true) throw new Error(res?.message || 'Failed to restore file');
+                        showToast(res.message || 'File restored successfully', 'success');
+                        setTimeout(() => location.reload(), 800);
+                    })
+                    .catch((e) => {
+                        showToast(e?.message || 'Failed to restore file', 'error');
                     });
             }
         });
@@ -1229,9 +1264,13 @@ $totalTrash = count($allTrashedItems);
         }).then((result) => {
             if (result.isConfirmed && result.value) {
                 ajaxRequest('<?= BASE_URL ?>/document-file/permanent-delete', { file_id: id }, 'POST')
-                    .then(() => {
-                        showToast('File deleted permanently', 'success');
-                        setTimeout(() => location.reload(), 1000);
+                    .then((res) => {
+                        if (!res || res.success !== true) throw new Error(res?.message || 'Failed to delete file');
+                        showToast(res.message || 'File deleted permanently', 'success');
+                        setTimeout(() => location.reload(), 800);
+                    })
+                    .catch((e) => {
+                        showToast(e?.message || 'Failed to delete file', 'error');
                     });
             } else if (result.isConfirmed && !result.value) {
                 Swal.fire('Checkbox Required', 'Please confirm by checking the box', 'warning');
@@ -1257,9 +1296,13 @@ $totalTrash = count($allTrashedItems);
         }).then((result) => {
             if (result.isConfirmed) {
                 ajaxRequest('<?= BASE_URL ?>/admin/trash/empty', {}, 'POST')
-                    .then(() => {
-                        showToast('Recycle Bin emptied successfully', 'success');
-                        setTimeout(() => location.reload(), 1000);
+                    .then((res) => {
+                        if (!res || res.success !== true) throw new Error(res?.message || 'Failed to empty recycle bin');
+                        showToast(res.message || 'Recycle Bin emptied successfully', 'success');
+                        setTimeout(() => location.reload(), 800);
+                    })
+                    .catch((e) => {
+                        showToast(e?.message || 'Failed to empty recycle bin', 'error');
                     });
             }
         });

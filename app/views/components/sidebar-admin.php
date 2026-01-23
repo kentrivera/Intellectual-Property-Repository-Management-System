@@ -8,7 +8,7 @@ if (!function_exists('isActiveLink')) {
 ?>
 
 <!-- Admin Sidebar Navigation -->
-<aside id="sidebar" class="fixed inset-y-0 left-0 w-72 bg-slate-900 text-slate-300 transform -translate-x-full lg:translate-x-0 transition-transform duration-300 ease-in-out z-40 shadow-xl flex flex-col h-full border-r border-slate-800">
+<aside id="sidebar" class="fixed inset-y-0 left-0 w-[85vw] max-w-72 lg:w-72 bg-slate-900 text-slate-300 transform -translate-x-full lg:translate-x-0 transition-transform duration-300 ease-in-out z-50 shadow-xl flex flex-col h-full border-r border-slate-800">
     <!-- Brand Logo -->
     <div class="h-16 flex items-center px-6 border-b border-slate-800 bg-slate-950/50">
         <a href="<?= BASE_URL ?>/admin/dashboard" class="flex items-center gap-3 group">
@@ -167,43 +167,9 @@ if (!function_exists('isActiveLink')) {
 </aside>
 
 <!-- Mobile Overlay -->
-<div id="sidebarOverlay" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-30 lg:hidden hidden transition-opacity duration-300 opacity-0" onclick="toggleSidebar()"></div>
+<div id="sidebarOverlay" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-40 lg:hidden hidden transition-opacity duration-300 opacity-0"></div>
 
 <script>
-    // Initialize Sidebar State
-    function initSidebar() {
-        const sidebar = document.getElementById('sidebar');
-        const overlay = document.getElementById('sidebarOverlay');
-        const menuBtn = document.getElementById('menuToggle');
-        const closeBtn = document.getElementById('closeSidebar');
-
-        function open() {
-            sidebar.classList.remove('-translate-x-full');
-            overlay.classList.remove('hidden');
-            // Small delay to allow display:block to apply before opacity transition
-            setTimeout(() => overlay.classList.remove('opacity-0'), 10);
-        }
-
-        function close() {
-            sidebar.classList.add('-translate-x-full');
-            overlay.classList.add('opacity-0');
-            setTimeout(() => overlay.classList.add('hidden'), 300);
-        }
-
-        if (menuBtn) menuBtn.onclick = open;
-        if (closeBtn) closeBtn.onclick = close;
-        window.toggleSidebar = () => {
-             if (sidebar.classList.contains('-translate-x-full')) open(); else close();
-        };
-    }
-
-    // Run on load
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initSidebar);
-    } else {
-        initSidebar();
-    }
-
     // Logout confirmation function
     function confirmLogout(event) {
         event.preventDefault();

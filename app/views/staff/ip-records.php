@@ -1,3 +1,11 @@
+<?php
+// Staff IP Records now uses the Drive-style Folder Repository UI.
+// Render it in read-only mode for staff.
+$recordFoldersReadOnly = true;
+require APP_PATH . '/views/admin/ip-records.php';
+return;
+?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -16,7 +24,7 @@
         include APP_PATH . '/views/components/sidebar-staff.php'; 
         ?>
 
-        <div class="flex-1 flex flex-col overflow-hidden lg:ml-64">
+        <div class="flex-1 flex flex-col overflow-hidden lg:ml-72">
             <?php include APP_PATH . '/views/components/header.php'; ?>
 
             <main class="flex-1 overflow-y-auto p-4 lg:p-6">
@@ -44,7 +52,7 @@
                     
                     <div class="flex items-center gap-2">
                         <div class="relative">
-                            <button onclick="toggleNewMenu()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition shadow-sm flex items-center">
+                            <button id="newMenuBtn" onclick="toggleNewMenu(event)" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition shadow-sm flex items-center">
                                 <i class="fas fa-plus mr-2"></i>New
                                 <i class="fas fa-chevron-down ml-2 text-sm"></i>
                             </button>
@@ -314,7 +322,7 @@
         </div>
     </div>
 
-    <script src="<?= BASE_URL ?>/js/common.js"></script>
+    <script src="<?= BASE_URL ?>/js/common.js?v=<?= filemtime(PUBLIC_PATH . '/js/common.js') ?>"></script>
     <script src="<?= BASE_URL ?>/js/utils.js"></script>
     <script>
         let currentView = localStorage.getItem('ipRecordsView') || 'grid';
@@ -384,7 +392,7 @@
                 });
             }
             
-            showToast('info', `Opened ${folderNames[folderType]} folder`);
+            showToast(`Opened ${folderNames[folderType]} folder`, 'info');
         }
 
         function showFolderMenu(event, folderId) {
@@ -523,7 +531,7 @@
         }
 
         function sortBy(criteria) {
-            showToast('info', `Sorted by ${criteria}`);
+            showToast(`Sorted by ${criteria}`, 'info');
         }
 
         function applyFilters(filters) {
@@ -537,7 +545,7 @@
                     card.style.display = 'none';
                 }
             });
-            showToast('success', 'Filters applied');
+            showToast('Filters applied', 'success');
         }
 
         function filterRecords() {
@@ -571,7 +579,7 @@
                 icon: 'question',
                 showCancelButton: true,
                 confirmButtonText: 'Submit Request',
-                confirmButtonColor: '#6366f1',
+                confirmButtonColor: '#059669',
                 width: 600,
                 preConfirm: () => {
                     const reason = document.getElementById('downloadReason').value;
@@ -583,15 +591,20 @@
                 }
             }).then((result) => {
                 if (result.isConfirmed) {
-                    IPRepoUtils.Loading.show('Submitting request...');
-                    ajaxRequest('<?= BASE_URL ?>/staff/download-requests/create', {
+                    showLoading('Submitting request...');
+                    ajaxRequest('<?= BASE_URL ?>/staff/request-download', {
                         ip_record_id: recordId,
                         reason: result.value
-                    }, 'POST').then(() => {
-                        IPRepoUtils.Loading.hide();
-                        showToast('success', 'Download request submitted successfully');
+                    }, 'POST').then((res) => {
+                        hideLoading();
+                        if (res && res.success) {
+                            showToast(res.message || 'Download request submitted successfully', 'success');
+                        } else {
+                            showToast(res?.message || 'Failed to submit request', 'error');
+                        }
                     }).catch(() => {
-                        IPRepoUtils.Loading.hide();
+                        hideLoading();
+                        showToast('Failed to submit request', 'error');
                     });
                 }
             });
@@ -611,7 +624,7 @@
                 confirmButtonColor: '#6366f1'
             }).then((result) => {
                 if (result.isConfirmed) {
-                    showToast('success', 'File shared successfully');
+                    showToast('File shared successfully', 'success');
                 }
             });
         }
@@ -619,7 +632,7 @@
         function copyLink(id) {
             const link = `<?= BASE_URL ?>/staff/ip-records/view/${id}`;
             navigator.clipboard.writeText(link).then(() => {
-                showToast('success', 'Link copied to clipboard');
+                showToast('Link copied to clipboard', 'success');
             });
         }
 
@@ -635,24 +648,46 @@
                         <p><strong>Owner:</strong> Tech Innovations Inc.</p>
                     </div>
                 `,
-                confirmButtonColor: '#6366f1'
+                confirmButtonColor: '#059669'
             });
         }
 
         // Toggle New Menu
-        function toggleNewMenu() {
+        function toggleNewMenu(event) {
+            if (event) {
+                event.stopPropagation();
+            }
             const menu = document.getElementById('newMenu');
-            menu.classList.toggle('hidden');
+            const btn = document.getElementById('newMenuBtn');
+            if (!menu || !btn) return;
+
+            if (menu.classList.contains('hidden')) {
+                const rect = btn.getBoundingClientRect();
+                menu.style.top = (rect.bottom + 8) + 'px';
+                menu.style.left = rect.left + 'px';
+
+                // Adjust if offscreen
+                if (window.innerWidth < rect.left + 224) {
+                    menu.style.left = 'auto';
+                    menu.style.right = (window.innerWidth - rect.right) + 'px';
+                } else {
+                    menu.style.right = 'auto';
+                }
+
+                menu.classList.remove('hidden');
+            } else {
+                menu.classList.add('hidden');
+            }
         }
 
         // Close menu when clicking outside
         document.addEventListener('click', function(event) {
             const menu = document.getElementById('newMenu');
             const button = event.target.closest('button');
-            if (!button || button.getAttribute('onclick') !== 'toggleNewMenu()') {
-                if (!menu.contains(event.target) && !menu.classList.contains('hidden')) {
-                    menu.classList.add('hidden');
-                }
+            const toggleFn = button ? (button.getAttribute('onclick') || '') : '';
+            if (toggleFn && toggleFn.includes('toggleNewMenu')) return;
+            if (menu && !menu.contains(event.target) && !menu.classList.contains('hidden')) {
+                menu.classList.add('hidden');
             }
         });
 
@@ -669,7 +704,7 @@
                 `,
                 showCancelButton: true,
                 confirmButtonText: 'Create',
-                confirmButtonColor: '#6366f1',
+                confirmButtonColor: '#059669',
                 cancelButtonText: 'Cancel',
                 width: 450,
                 preConfirm: () => {
@@ -689,12 +724,12 @@
 
         // Create Folder
         function createFolder(folderName) {
-            IPRepoUtils.Loading.show('Creating folder...');
+            showLoading('Creating folder...');
             
             // Simulate API call
             setTimeout(() => {
-                IPRepoUtils.Loading.hide();
-                showToast('success', `Folder "${folderName}" created successfully`);
+                hideLoading();
+                showToast(`Folder "${folderName}" created successfully`, 'success');
                 
                 // Here you would make an AJAX call to create the folder
                 // ajaxRequest('<?= BASE_URL ?>/staff/folders/create', {
@@ -711,7 +746,7 @@
                 title: 'Upload files',
                 html: `
                     <div class="text-left">
-                        <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-indigo-400 transition cursor-pointer" onclick="document.getElementById('fileUpload').click()">
+                        <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-emerald-400 transition cursor-pointer" onclick="document.getElementById('fileUpload').click()">
                             <i class="fas fa-cloud-upload-alt text-6xl text-gray-400 mb-4"></i>
                             <p class="text-gray-700 font-medium mb-2">Click to select files</p>
                             <p class="text-sm text-gray-500">or drag and drop files here</p>
@@ -723,7 +758,7 @@
                 `,
                 showCancelButton: true,
                 confirmButtonText: 'Upload',
-                confirmButtonColor: '#6366f1',
+                confirmButtonColor: '#059669',
                 cancelButtonText: 'Cancel',
                 width: 600,
                 preConfirm: () => {
@@ -745,16 +780,16 @@
             if (dropZone) {
                 dropZone.addEventListener('dragover', (e) => {
                     e.preventDefault();
-                    dropZone.classList.add('border-indigo-500', 'bg-indigo-50');
+                    dropZone.classList.add('border-emerald-500', 'bg-emerald-50');
                 });
                 
                 dropZone.addEventListener('dragleave', () => {
-                    dropZone.classList.remove('border-indigo-500', 'bg-indigo-50');
+                    dropZone.classList.remove('border-emerald-500', 'bg-emerald-50');
                 });
                 
                 dropZone.addEventListener('drop', (e) => {
                     e.preventDefault();
-                    dropZone.classList.remove('border-indigo-500', 'bg-indigo-50');
+                    dropZone.classList.remove('border-emerald-500', 'bg-emerald-50');
                     const files = e.dataTransfer.files;
                     document.getElementById('fileUpload').files = files;
                     handleFileSelect({ target: { files } });
@@ -787,7 +822,7 @@
 
         // Upload Files
         function uploadFiles(files) {
-            IPRepoUtils.Loading.show('Uploading files...');
+            showLoading('Uploading files...');
             
             const formData = new FormData();
             Array.from(files).forEach((file, index) => {
@@ -800,13 +835,13 @@
             const interval = setInterval(() => {
                 progress += 10;
                 if (progress <= 100) {
-                    IPRepoUtils.Loading.show(`Uploading... ${progress}%`);
+                    showLoading(`Uploading... ${progress}%`);
                 }
                 if (progress >= 100) {
                     clearInterval(interval);
                     setTimeout(() => {
-                        IPRepoUtils.Loading.hide();
-                        showToast('success', `${files.length} file(s) uploaded successfully`);
+                        hideLoading();
+                        showToast(`${files.length} file(s) uploaded successfully`, 'success');
                         // Refresh the view
                         // location.reload();
                     }, 500);

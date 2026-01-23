@@ -1062,7 +1062,102 @@ function isNodeInCurrentPath(nodeId) {
 // Toggle actions menu dropdown
 function toggleActionsMenu() {
     const menu = document.getElementById('actionsMenu');
-    menu.classList.toggle('hidden');
+    const menuBtn = document.getElementById('actionsMenuBtn');
+    if (!menu || !menuBtn) return;
+
+    const willOpen = menu.classList.contains('hidden');
+    if (!willOpen) {
+        menu.classList.add('hidden');
+        resetDropdownStyles(menu);
+        return;
+    }
+
+    // Prepare for measurement/positioning
+    menu.classList.remove('hidden');
+    menu.style.position = 'fixed';
+    menu.style.zIndex = '70';
+    menu.style.visibility = 'hidden';
+    menu.style.left = '0px';
+    menu.style.top = '0px';
+    menu.style.maxHeight = '';
+    menu.style.overflowY = '';
+
+    const margin = 8;
+    const btnRect = menuBtn.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+
+    const spaceBelow = window.innerHeight - btnRect.bottom;
+    const spaceAbove = btnRect.top;
+    // Add a buffer so menus near the bottom (e.g., last/second-to-last row) open upward
+    const buffer = 56;
+    const openUp = spaceBelow < (menuRect.height + buffer) && spaceAbove > spaceBelow;
+
+    const desiredTop = openUp
+        ? (btnRect.top - menuRect.height - margin)
+        : (btnRect.bottom + margin);
+
+    const top = Math.max(
+        margin,
+        Math.min(window.innerHeight - menuRect.height - margin, desiredTop)
+    );
+
+    // Right-align to the button; clamp within viewport.
+    let left = btnRect.right - menuRect.width;
+    left = Math.min(window.innerWidth - menuRect.width - margin, left);
+    left = Math.max(margin, left);
+
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+
+    const availableHeight = openUp
+        ? (btnRect.top - margin)
+        : (window.innerHeight - (btnRect.bottom + margin) - margin);
+
+    if (availableHeight > 120 && menuRect.height > availableHeight) {
+        menu.style.maxHeight = `${Math.max(120, availableHeight)}px`;
+        menu.style.overflowY = 'auto';
+    }
+
+    menu.style.visibility = '';
+}
+
+// Floating (body-attached) menu for per-item actions (prevents clipping in scroll containers)
+let __rfFloatingMenu = null;
+let __rfFloatingMenuAnchorBtn = null;
+
+function ensureFloatingMenu() {
+    if (__rfFloatingMenu) return __rfFloatingMenu;
+
+    const el = document.createElement('div');
+    el.id = 'rfFloatingMenu';
+    el.className = 'rf-floating-menu hidden py-1 text-xs';
+    el.style.position = 'fixed';
+    el.style.left = '0px';
+    el.style.top = '0px';
+    el.style.minWidth = '10rem';
+    el.style.maxWidth = '90vw';
+    el.style.zIndex = '99999';
+    el.style.background = '#ffffff';
+    el.style.border = '1px solid #e5e7eb';
+    el.style.borderRadius = '0.5rem';
+    el.style.boxShadow = '0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1)';
+
+    // Prevent outside-click handler from firing when interacting with the menu
+    el.addEventListener('click', (e) => e.stopPropagation());
+
+    document.body.appendChild(el);
+    __rfFloatingMenu = el;
+    return el;
+}
+
+function hideFloatingMenu() {
+    if (!__rfFloatingMenu) return;
+    __rfFloatingMenu.classList.add('hidden');
+    __rfFloatingMenu.style.left = '0px';
+    __rfFloatingMenu.style.top = '0px';
+    __rfFloatingMenu.style.maxHeight = '';
+    __rfFloatingMenu.style.overflowY = '';
+    __rfFloatingMenuAnchorBtn = null;
 }
 
 // Toggle individual item menu
@@ -1072,8 +1167,57 @@ function toggleItemMenu(button) {
     
     // Toggle this menu
     const menu = button.nextElementSibling;
-    if (menu && menu.classList.contains('item-menu')) {
-        menu.classList.toggle('hidden');
+    if (!menu || !menu.classList.contains('item-menu')) return;
+
+    // Render the menu in a body-attached floating container so it cannot be clipped.
+    const floating = ensureFloatingMenu();
+
+    // If clicking the same anchor while menu is open, close it
+    if (!floating.classList.contains('hidden') && __rfFloatingMenuAnchorBtn === button) {
+        hideFloatingMenu();
+        return;
+    }
+
+    floating.innerHTML = menu.innerHTML;
+    floating.classList.remove('hidden');
+    __rfFloatingMenuAnchorBtn = button;
+
+    // Measure after content injection
+    const margin = 8;
+    const buffer = 56;
+    const btnRect = button.getBoundingClientRect();
+    const menuRect = floating.getBoundingClientRect();
+
+    const spaceBelow = window.innerHeight - btnRect.bottom;
+    const spaceAbove = btnRect.top;
+    const openUp = spaceBelow < (menuRect.height + buffer) && spaceAbove > spaceBelow;
+
+    const desiredTop = openUp
+        ? (btnRect.top - menuRect.height - margin)
+        : (btnRect.bottom + margin);
+
+    const top = Math.max(
+        margin,
+        Math.min(window.innerHeight - menuRect.height - margin, desiredTop)
+    );
+
+    let left = btnRect.right - menuRect.width;
+    left = Math.min(window.innerWidth - menuRect.width - margin, left);
+    left = Math.max(margin, left);
+
+    floating.style.left = `${left}px`;
+    floating.style.top = `${top}px`;
+
+    const availableHeight = openUp
+        ? (btnRect.top - margin)
+        : (window.innerHeight - (btnRect.bottom + margin) - margin);
+
+    if (availableHeight > 120 && menuRect.height > availableHeight) {
+        floating.style.maxHeight = `${Math.max(120, availableHeight)}px`;
+        floating.style.overflowY = 'auto';
+    } else {
+        floating.style.maxHeight = '';
+        floating.style.overflowY = '';
     }
 }
 
@@ -1081,7 +1225,24 @@ function toggleItemMenu(button) {
 function closeAllMenus() {
     document.querySelectorAll('.item-menu').forEach(menu => {
         menu.classList.add('hidden');
+        resetDropdownStyles(menu);
     });
+
+    hideFloatingMenu();
+}
+
+function resetDropdownStyles(menu) {
+    if (!menu) return;
+    menu.style.position = '';
+    menu.style.zIndex = '';
+    menu.style.left = '';
+    menu.style.top = '';
+    menu.style.bottom = '';
+    menu.style.marginTop = '';
+    menu.style.marginBottom = '';
+    menu.style.maxHeight = '';
+    menu.style.overflowY = '';
+    menu.style.visibility = '';
 }
 
 // Close menu when clicking outside
@@ -1091,13 +1252,33 @@ document.addEventListener('click', function(event) {
     
     if (menu && menuBtn && !menu.contains(event.target) && !menuBtn.contains(event.target)) {
         menu.classList.add('hidden');
+        resetDropdownStyles(menu);
     }
     
-    // Close item menus if clicking outside
-    if (!event.target.closest('.relative')) {
+    // Close item menus if clicking outside buttons/menus
+    if (!event.target.closest('.relative') && !event.target.closest('.rf-floating-menu')) {
         closeAllMenus();
     }
 });
+
+// Close menus on scroll/resize to avoid overlap at edges
+window.addEventListener('resize', () => {
+    const menu = document.getElementById('actionsMenu');
+    if (menu) {
+        menu.classList.add('hidden');
+        resetDropdownStyles(menu);
+    }
+    closeAllMenus();
+});
+
+window.addEventListener('scroll', () => {
+    const menu = document.getElementById('actionsMenu');
+    if (menu) {
+        menu.classList.add('hidden');
+        resetDropdownStyles(menu);
+    }
+    closeAllMenus();
+}, true);
 
 // Folder tree search functionality
 function filterFolderTree(searchTerm) {

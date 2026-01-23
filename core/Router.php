@@ -56,8 +56,18 @@ class Router {
                 $pattern = $this->convertPathToRegex($route['path']);
                 
                 if (preg_match($pattern, $requestPath, $matches)) {
-                    array_shift($matches); // Remove full match
-                    return $this->executeCallback($route['callback'], $matches);
+                    // preg_match with named capture groups returns BOTH numeric and string keys.
+                    // Passing mixed keys into call_user_func_array() can trigger:
+                    // "Cannot use positional argument after named argument" (PHP 8+).
+                    // We only need positional params in the order they appear in the route.
+                    unset($matches[0]); // Remove full match
+                    $params = [];
+                    foreach ($matches as $key => $value) {
+                        if (is_int($key)) {
+                            $params[] = $value;
+                        }
+                    }
+                    return $this->executeCallback($route['callback'], $params);
                 }
             }
         }

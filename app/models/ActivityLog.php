@@ -68,6 +68,16 @@ class ActivityLog {
             $sql .= " AND DATE(al.created_at) <= ?";
             $params[] = $filters['date_to'];
         }
+
+        if (!empty($filters['search'])) {
+            $sql .= " AND (al.description LIKE ? OR al.action_type LIKE ? OR al.entity_type LIKE ? OR u.username LIKE ? OR u.full_name LIKE ?)";
+            $term = '%' . $filters['search'] . '%';
+            $params[] = $term;
+            $params[] = $term;
+            $params[] = $term;
+            $params[] = $term;
+            $params[] = $term;
+        }
         
         $sql .= " ORDER BY al.created_at DESC LIMIT ? OFFSET ?";
         $params[] = $perPage;
@@ -80,7 +90,7 @@ class ActivityLog {
      * Get total count
      */
     public function getCount($filters = []) {
-        $sql = "SELECT COUNT(*) as count FROM activity_logs WHERE 1=1";
+        $sql = "SELECT COUNT(*) as count FROM activity_logs al LEFT JOIN users u ON al.user_id = u.id WHERE 1=1";
         $params = [];
         
         if (!empty($filters['user_id'])) {
@@ -106,6 +116,16 @@ class ActivityLog {
         if (!empty($filters['date_to'])) {
             $sql .= " AND DATE(created_at) <= ?";
             $params[] = $filters['date_to'];
+        }
+
+        if (!empty($filters['search'])) {
+            $sql .= " AND (al.description LIKE ? OR al.action_type LIKE ? OR al.entity_type LIKE ? OR u.username LIKE ? OR u.full_name LIKE ?)";
+            $term = '%' . $filters['search'] . '%';
+            $params[] = $term;
+            $params[] = $term;
+            $params[] = $term;
+            $params[] = $term;
+            $params[] = $term;
         }
         
         $result = $this->db->fetch($sql, $params);

@@ -164,6 +164,11 @@ class AdminController extends Controller {
             if (!$user) {
                 $this->json(['success' => false, 'message' => 'User not found']);
             }
+
+            // Prevent deactivating self (avoid accidental lockout)
+            if ($userId == $this->getCurrentUserId() && $status === 'inactive') {
+                $this->json(['success' => false, 'message' => 'You cannot deactivate your own account']);
+            }
             
             $this->userModel->update($userId, ['status' => $status]);
             
@@ -177,6 +182,93 @@ class AdminController extends Controller {
             ]);
             
             $this->json(['success' => true, 'message' => 'User status updated']);
+        }
+    }
+    
+    /**
+     * Update User
+     */
+    public function updateUser() {
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $userId = $_POST['user_id'] ?? 0;
+            
+            $user = $this->userModel->findById($userId);
+            if (!$user) {
+                $this->json(['success' => false, 'message' => 'User not found']);
+            }
+            
+            $data = [];
+
+            $incomingUsername = isset($_POST['username']) ? $this->sanitize($_POST['username']) : null;
+            $incomingEmail = isset($_POST['email']) ? $this->sanitize($_POST['email']) : null;
+            $incomingFullName = isset($_POST['full_name']) ? $this->sanitize($_POST['full_name']) : null;
+            
+            // Check which fields to update
+            if ($incomingUsername !== null) {
+                if ($incomingUsername === '') {
+                    $this->json(['success' => false, 'message' => 'Username is required']);
+                }
+            }
+            if (!empty($incomingUsername) && $incomingUsername !== $user['username']) {
+                // Check if new username exists
+                $existingUser = $this->userModel->findByUsername($incomingUsername);
+                if ($existingUser && $existingUser['id'] != $userId) {
+                    $this->json(['success' => false, 'message' => 'Username already exists']);
+                }
+                $data['username'] = $incomingUsername;
+            }
+            
+            if ($incomingEmail !== null) {
+                if ($incomingEmail === '') {
+                    $this->json(['success' => false, 'message' => 'Email is required']);
+                }
+            }
+            if (!empty($incomingEmail) && $incomingEmail !== $user['email']) {
+                // Check if new email exists
+                $existingUser = $this->userModel->findByEmail($incomingEmail);
+                if ($existingUser && $existingUser['id'] != $userId) {
+                    $this->json(['success' => false, 'message' => 'Email already exists']);
+                }
+                $data['email'] = $incomingEmail;
+            }
+            
+            if ($incomingFullName !== null) {
+                if ($incomingFullName === '') {
+                    $this->json(['success' => false, 'message' => 'Full name is required']);
+                }
+                if ($incomingFullName !== ($user['full_name'] ?? '')) {
+                    $data['full_name'] = $incomingFullName;
+                }
+            }
+            
+            if (!empty($_POST['role']) && in_array($_POST['role'], ['admin', 'staff'])) {
+                $data['role'] = $_POST['role'];
+            }
+            
+            if (!empty($_POST['password'])) {
+                $data['password'] = $_POST['password'];
+            }
+            
+            if (empty($data)) {
+                $this->json(['success' => false, 'message' => 'No changes to update']);
+            }
+            
+            try {
+                $this->userModel->update($userId, $data);
+                
+                // Log activity
+                $this->activityLog->log([
+                    'user_id' => $this->getCurrentUserId(),
+                    'action_type' => 'user_update',
+                    'entity_type' => 'user',
+                    'entity_id' => $userId,
+                    'description' => "Updated user: {$user['username']}"
+                ]);
+                
+                $this->json(['success' => true, 'message' => 'User updated successfully']);
+            } catch (Exception $e) {
+                $this->json(['success' => false, 'message' => 'Failed to update user']);
+            }
         }
     }
     
@@ -349,21 +441,41 @@ class AdminController extends Controller {
      * Download Requests Management
      */
     public function downloadRequests() {
-        $page = $_GET['page'] ?? 1;
-        $status = $_GET['status'] ?? '';
-        
+        $page = max(1, (int)($_GET['page'] ?? 1));
+        $status = trim((string)($_GET['status'] ?? ''));
+        $q = trim((string)($_GET['q'] ?? ''));
+
         $filters = [];
         if ($status) $filters['status'] = $status;
-        
+        if ($q !== '') $filters['search'] = $q;
+
         $requests = $this->downloadRequestModel->getAll($page, RECORDS_PER_PAGE, $filters);
-        $totalRequests = $this->downloadRequestModel->getCount($filters);
-        $totalPages = ceil($totalRequests / RECORDS_PER_PAGE);
-        
+        $totalRequests = (int)$this->downloadRequestModel->getCount($filters);
+        $totalPages = max(1, (int)ceil($totalRequests / RECORDS_PER_PAGE));
+        if ($page > $totalPages) $page = $totalPages;
+
+        $start = $totalRequests > 0 ? (($page - 1) * RECORDS_PER_PAGE + 1) : 0;
+        $end = $totalRequests > 0 ? min($page * RECORDS_PER_PAGE, $totalRequests) : 0;
+
+        $stats = method_exists($this->downloadRequestModel, 'getStats')
+            ? $this->downloadRequestModel->getStats()
+            : [ 'total' => $totalRequests, 'pending' => 0, 'approved_today' => 0, 'rejected_today' => 0 ];
+
         $this->view('admin/download-requests', [
             'requests' => $requests,
-            'status_filter' => $status,
-            'current_page' => $page,
-            'total_pages' => $totalPages,
+            'stats' => $stats,
+            'filters' => [
+                'status' => $status,
+                'q' => $q
+            ],
+            'pagination' => [
+                'page' => $page,
+                'per_page' => RECORDS_PER_PAGE,
+                'total_pages' => $totalPages,
+                'total' => $totalRequests,
+                'start' => $start,
+                'end' => $end
+            ],
             'page_title' => 'Download Requests',
             'csrf_token' => $this->generateCSRF()
         ]);
@@ -377,13 +489,24 @@ class AdminController extends Controller {
             $requestId = $_POST['request_id'] ?? 0;
             $downloadLimit = $_POST['download_limit'] ?? DEFAULT_DOWNLOAD_LIMIT;
             $expiryHours = $_POST['expiry_hours'] ?? TOKEN_EXPIRY_HOURS;
+            $reviewNotes = $this->sanitize($_POST['review_notes'] ?? '');
             
             $request = $this->downloadRequestModel->findById($requestId);
             if (!$request) {
                 $this->json(['success' => false, 'message' => 'Request not found']);
             }
             
-            $token = $this->downloadRequestModel->approve($requestId, $this->getCurrentUserId(), $downloadLimit, $expiryHours);
+            $token = $this->downloadRequestModel->approve(
+                $requestId,
+                $this->getCurrentUserId(),
+                $downloadLimit,
+                $expiryHours,
+                ($reviewNotes !== '' ? $reviewNotes : null)
+            );
+
+            if (!$token) {
+                $this->json(['success' => false, 'message' => 'Failed to approve request']);
+            }
             
             // Log activity
             $this->activityLog->log([
@@ -394,7 +517,14 @@ class AdminController extends Controller {
                 'description' => "Approved download request for document: {$request['document_name']}"
             ]);
             
-            $this->json(['success' => true, 'message' => 'Request approved successfully']);
+            $this->json([
+                'success' => true,
+                'message' => 'Request approved successfully',
+                'request_id' => (int)$requestId,
+                'status' => 'approved',
+                'download_token' => $token,
+                'download_url' => BASE_URL . '/document/download/' . $token
+            ]);
         }
     }
     
@@ -411,7 +541,11 @@ class AdminController extends Controller {
                 $this->json(['success' => false, 'message' => 'Request not found']);
             }
             
-            $this->downloadRequestModel->reject($requestId, $this->getCurrentUserId(), $reviewNotes);
+            $ok = $this->downloadRequestModel->reject($requestId, $this->getCurrentUserId(), $reviewNotes);
+
+            if (!$ok) {
+                $this->json(['success' => false, 'message' => 'Failed to reject request']);
+            }
             
             // Log activity
             $this->activityLog->log([
@@ -422,8 +556,69 @@ class AdminController extends Controller {
                 'description' => "Rejected download request for document: {$request['document_name']}"
             ]);
             
-            $this->json(['success' => true, 'message' => 'Request rejected']);
+            $this->json([
+                'success' => true,
+                'message' => 'Request rejected',
+                'request_id' => (int)$requestId,
+                'status' => 'rejected'
+            ]);
         }
+    }
+
+    /**
+     * Notifications (Admin)
+     * Returns JSON items for header dropdown.
+     */
+    public function notifications() {
+        $this->requireAdmin();
+
+        $limit = max(1, min(20, (int)($_GET['limit'] ?? 10)));
+        $since = trim((string)($_GET['since'] ?? ''));
+
+        $sinceTs = null;
+        if ($since !== '') {
+            if (ctype_digit($since)) {
+                $n = (int)$since;
+                if ($n > 100000000000) {
+                    $n = (int)floor($n / 1000);
+                }
+                if ($n > 0) {
+                    $sinceTs = date('Y-m-d H:i:s', $n);
+                }
+            } else {
+                $t = strtotime($since);
+                if ($t) {
+                    $sinceTs = date('Y-m-d H:i:s', $t);
+                }
+            }
+        }
+
+        $rows = method_exists($this->downloadRequestModel, 'getAdminNotificationItems')
+            ? $this->downloadRequestModel->getAdminNotificationItems($limit, $sinceTs)
+            : [];
+
+        $items = [];
+        foreach ($rows as $row) {
+            $docName = (string)($row['document_name'] ?? 'Document');
+            $requester = (string)($row['requester_name'] ?? 'Someone');
+
+            $items[] = [
+                'id' => (int)($row['id'] ?? 0),
+                'type' => 'download_request',
+                'status' => 'pending',
+                'title' => 'New download request',
+                'body' => $requester . ' requested: ' . $docName,
+                'event_at' => (string)($row['event_at'] ?? ''),
+                'url' => BASE_URL . '/admin/download-requests?status=pending',
+                'ip_record_id' => (int)($row['ip_record_id'] ?? 0)
+            ];
+        }
+
+        $this->json([
+            'success' => true,
+            'items' => $items,
+            'server_time' => date('Y-m-d H:i:s')
+        ]);
     }
     
     /**
@@ -651,25 +846,81 @@ class AdminController extends Controller {
      * Activity Logs
      */
     public function activityLogs() {
-        $page = $_GET['page'] ?? 1;
-        $actionType = $_GET['action_type'] ?? '';
-        $userId = $_GET['user_id'] ?? '';
-        
+        $page = max(1, (int)($_GET['page'] ?? 1));
+        $q = trim((string)($_GET['q'] ?? ''));
+        $actionType = trim((string)($_GET['action_type'] ?? ''));
+        $userId = (int)($_GET['user_id'] ?? 0);
+        $date = trim((string)($_GET['date'] ?? ''));
+
         $filters = [];
-        if ($actionType) $filters['action_type'] = $actionType;
-        if ($userId) $filters['user_id'] = $userId;
-        
-        $logs = $this->activityLog->getAll($page, RECORDS_PER_PAGE, $filters);
-        $totalLogs = $this->activityLog->getCount($filters);
-        $totalPages = ceil($totalLogs / RECORDS_PER_PAGE);
-        
+        if ($q !== '') $filters['search'] = $q;
+        if ($actionType !== '') $filters['action_type'] = $actionType;
+        if ($userId > 0) $filters['user_id'] = $userId;
+
+        // Single-day filter from the UI
+        if ($date !== '') {
+            $filters['date_from'] = $date;
+            $filters['date_to'] = $date;
+        }
+
+        // Export (CSV for now)
+        $export = strtolower(trim((string)($_GET['export'] ?? '')));
+        if ($export === 'csv') {
+            $rows = $this->activityLog->getAll(1, 5000, $filters);
+
+            $filename = 'activity-logs_' . date('Y-m-d_His') . '.csv';
+            header('Content-Type: text/csv; charset=utf-8');
+            header('Content-Disposition: attachment; filename=' . $filename);
+
+            $out = fopen('php://output', 'w');
+            fputcsv($out, ['Date', 'User', 'Action', 'Entity', 'Entity ID', 'Description', 'IP Address', 'User Agent']);
+            foreach ($rows as $r) {
+                $userName = $r['full_name'] ?? $r['username'] ?? '';
+                fputcsv($out, [
+                    $r['created_at'] ?? '',
+                    $userName,
+                    $r['action_type'] ?? '',
+                    $r['entity_type'] ?? '',
+                    $r['entity_id'] ?? '',
+                    $r['description'] ?? '',
+                    $r['ip_address'] ?? '',
+                    $r['user_agent'] ?? ''
+                ]);
+            }
+            fclose($out);
+            exit;
+        }
+
+        $activityLogs = $this->activityLog->getAll($page, RECORDS_PER_PAGE, $filters);
+        $totalLogs = (int)$this->activityLog->getCount($filters);
+        $totalPages = max(1, (int)ceil($totalLogs / RECORDS_PER_PAGE));
+        if ($page > $totalPages) $page = $totalPages;
+
+        $start = $totalLogs > 0 ? (($page - 1) * RECORDS_PER_PAGE + 1) : 0;
+        $end = $totalLogs > 0 ? min($page * RECORDS_PER_PAGE, $totalLogs) : 0;
+
+        // For the user filter dropdown
+        $users = $this->userModel->getAll(['status' => 'active']);
+
         $this->view('admin/activity-logs', [
-            'logs' => $logs,
-            'current_page' => $page,
-            'total_pages' => $totalPages,
-            'action_filter' => $actionType,
-            'user_filter' => $userId,
-            'page_title' => 'Activity Logs'
+            'activityLogs' => $activityLogs,
+            'users' => $users,
+            'filters' => [
+                'q' => $q,
+                'action_type' => $actionType,
+                'user_id' => $userId > 0 ? (string)$userId : '',
+                'date' => $date
+            ],
+            'pagination' => [
+                'page' => $page,
+                'per_page' => RECORDS_PER_PAGE,
+                'total_pages' => $totalPages,
+                'total' => $totalLogs,
+                'start' => $start,
+                'end' => $end
+            ],
+            'page_title' => 'Activity Logs',
+            'csrf_token' => $this->generateCSRF()
         ]);
     }
     

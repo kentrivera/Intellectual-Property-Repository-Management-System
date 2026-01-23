@@ -362,6 +362,61 @@ class DocumentController extends Controller {
     }
 
     /**
+     * Inline preview for an IP document (view-only in UI).
+     * Used by staff pages to display a preview modal (iframe).
+     */
+    public function preview($id) {
+        $documentId = (int)$id;
+        if ($documentId <= 0) {
+            http_response_code(400);
+            echo 'Invalid document';
+            return;
+        }
+
+        $doc = $this->documentModel->findById($documentId);
+        if (!$doc) {
+            http_response_code(404);
+            echo 'Document not found';
+            return;
+        }
+
+        $path = (string)($doc['file_path'] ?? '');
+        if ($path === '' || !file_exists($path)) {
+            http_response_code(404);
+            echo 'File not found';
+            return;
+        }
+
+        // Log activity (non-fatal)
+        try {
+            $this->activityLog->log([
+                'user_id' => $this->getCurrentUserId(),
+                'action_type' => 'preview',
+                'entity_type' => 'document',
+                'entity_id' => $documentId,
+                'description' => "Previewed document: " . ($doc['original_name'] ?? 'Document')
+            ]);
+        } catch (Exception $e) {
+            // ignore
+        }
+
+        $downloadName = (string)($doc['original_name'] ?? basename($path));
+        $mimeType = @mime_content_type($path);
+        if (!$mimeType) {
+            $mimeType = 'application/octet-stream';
+        }
+
+        header('Content-Type: ' . $mimeType);
+        header('Content-Disposition: inline; filename="' . addslashes($downloadName) . '"');
+        header('Content-Length: ' . filesize($path));
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        header('Pragma: no-cache');
+
+        readfile($path);
+        exit;
+    }
+
+    /**
      * Enhanced file upload to folders
      */
     public function uploadToFolder() {

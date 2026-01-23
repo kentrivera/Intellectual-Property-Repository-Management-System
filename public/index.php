@@ -36,6 +36,7 @@ $router->get('/logout', 'AuthController@logout');
 $router->get('/admin/dashboard', 'AdminController@dashboard');
 $router->get('/admin/users', 'AdminController@users');
 $router->post('/admin/users/create', 'AdminController@createUser');
+$router->post('/admin/users/update', 'AdminController@updateUser');
 $router->post('/admin/users/update-status', 'AdminController@updateUserStatus');
 $router->post('/admin/users/delete', 'AdminController@deleteUser');
 
@@ -58,6 +59,7 @@ $router->post('/admin/folders/permanent-delete', 'FolderController@permanentDele
 $router->get('/admin/download-requests', 'AdminController@downloadRequests');
 $router->post('/admin/download-requests/approve', 'AdminController@approveRequest');
 $router->post('/admin/download-requests/reject', 'AdminController@rejectRequest');
+$router->get('/admin/notifications', 'AdminController@notifications');
 
 $router->get('/admin/trash', 'AdminController@trashBin');
 $router->post('/admin/trash/empty', 'AdminController@emptyTrash');
@@ -70,13 +72,25 @@ $router->get('/admin/activity-logs', 'AdminController@activityLogs');
 $router->get('/staff/dashboard', 'StaffController@dashboard');
 $router->get('/staff/ip-records', 'StaffController@ipRecords');
 $router->get('/staff/ip-records/:id', 'StaffController@viewIPRecord');
+
+// Legacy-compatible endpoints for the Record Folders UI (served via MVC) - Staff (read-only)
+$router->get('/staff/api_folders.php', 'RecordFoldersController@folders');
+$router->post('/staff/api_folders.php', 'RecordFoldersController@folders');
+$router->get('/staff/api_files.php', 'RecordFoldersController@files');
+$router->post('/staff/api_files.php', 'RecordFoldersController@files');
+$router->post('/staff/upload.php', 'RecordFoldersController@upload');
+
 $router->get('/staff/search', 'StaffController@search');
+$router->get('/staff/help', 'StaffController@help');
 $router->get('/staff/my-requests', 'StaffController@myRequests');
 $router->post('/staff/request-download', 'StaffController@requestDownload');
+$router->get('/staff/notifications', 'StaffController@notifications');
 
 // =====================
 // Common Routes (Both Admin & Staff)
 // =====================
+$router->get('/search/suggestions', 'SearchController@suggestions');
+
 $router->get('/dashboard', function() {
     if (isset($_SESSION['role'])) {
         $prefix = $_SESSION['role'] === 'admin' ? 'admin' : 'staff';
@@ -94,6 +108,7 @@ $router->post('/document/upload-version', 'DocumentController@uploadVersion');
 $router->post('/document/delete', 'DocumentController@delete');
 $router->post('/document/restore', 'DocumentController@restore');
 $router->post('/document/permanent-delete', 'DocumentController@permanentDelete');
+$router->get('/document/preview/:id', 'DocumentController@preview');
 $router->get('/document/download/:token', 'DocumentController@download');
 
 // Trash actions for folder-based file manager (document_files)
