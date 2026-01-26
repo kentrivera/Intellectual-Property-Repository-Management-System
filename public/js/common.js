@@ -25,8 +25,8 @@ async function confirmAction(title, text, confirmText = 'Yes, proceed') {
         text: text,
         icon: 'warning',
         showCancelButton: true,
-        confirmButtonColor: '#3085d6',
-        cancelButtonColor: '#d33',
+        confirmButtonColor: '#10b981',
+        cancelButtonColor: '#6b7280',
         confirmButtonText: confirmText,
         cancelButtonText: 'Cancel'
     });

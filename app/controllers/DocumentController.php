@@ -387,14 +387,26 @@ class DocumentController extends Controller {
             return;
         }
 
+        // Check if download mode (for admin users)
+        $isDownload = isset($_GET['download']) && $_GET['download'] == '1';
+        $disposition = $isDownload ? 'attachment' : 'inline';
+        
+        // Admin can download directly, staff can only preview
+        if ($isDownload && $_SESSION['role'] !== 'admin') {
+            http_response_code(403);
+            echo 'Download not permitted. Please request download permission.';
+            return;
+        }
+
         // Log activity (non-fatal)
         try {
+            $actionType = $isDownload ? 'download' : 'preview';
             $this->activityLog->log([
                 'user_id' => $this->getCurrentUserId(),
-                'action_type' => 'preview',
+                'action_type' => $actionType,
                 'entity_type' => 'document',
                 'entity_id' => $documentId,
-                'description' => "Previewed document: " . ($doc['original_name'] ?? 'Document')
+                'description' => ($isDownload ? "Downloaded" : "Previewed") . " document: " . ($doc['original_name'] ?? 'Document')
             ]);
         } catch (Exception $e) {
             // ignore
@@ -407,7 +419,7 @@ class DocumentController extends Controller {
         }
 
         header('Content-Type: ' . $mimeType);
-        header('Content-Disposition: inline; filename="' . addslashes($downloadName) . '"');
+        header('Content-Disposition: ' . $disposition . '; filename="' . addslashes($downloadName) . '"');
         header('Content-Length: ' . filesize($path));
         header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
         header('Pragma: no-cache');

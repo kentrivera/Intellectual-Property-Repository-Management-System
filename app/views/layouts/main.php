@@ -7,6 +7,19 @@
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        };
+    </script>
+    <!-- Inter Font for professional typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     
     <!-- SweetAlert2 -->
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -21,7 +34,7 @@
         [x-cloak] { display: none !important; }
     </style>
 </head>
-<body class="bg-gray-50">
+<body class="bg-gradient-to-br from-emerald-50 to-green-50 font-sans">
     <?php if (isset($_SESSION['logged_in']) && $_SESSION['logged_in']): ?>
     
     <!-- Include Admin or Staff Sidebar -->
@@ -40,7 +53,7 @@
         ?>
         
         <!-- Page Content Container -->
-        <main class="flex-1 p-4 sm:p-6 bg-gradient-to-br from-gray-50 to-gray-100">
+        <main class="flex-1 p-4 sm:p-6 bg-gradient-to-br from-white to-emerald-50">
             <?php endif; ?>
             
             <!-- Content goes here -->

@@ -84,12 +84,18 @@ $router->get('/staff/search', 'StaffController@search');
 $router->get('/staff/help', 'StaffController@help');
 $router->get('/staff/my-requests', 'StaffController@myRequests');
 $router->post('/staff/request-download', 'StaffController@requestDownload');
+$router->get('/staff/check-download-status', 'StaffController@checkDownloadStatus');
 $router->get('/staff/notifications', 'StaffController@notifications');
 
 // =====================
 // Common Routes (Both Admin & Staff)
 // =====================
 $router->get('/search/suggestions', 'SearchController@suggestions');
+
+// Account pages (role-aware, require login)
+$router->get('/profile', 'AccountController@profile');
+$router->get('/settings', 'AccountController@settings');
+$router->get('/help', 'AccountController@help');
 
 $router->get('/dashboard', function() {
     if (isset($_SESSION['role'])) {

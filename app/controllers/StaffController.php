@@ -490,6 +490,52 @@ class StaffController extends Controller {
             $this->json(['success' => true, 'message' => 'Download request submitted successfully']);
         }
     }
+    
+    /**
+     * Check download request status for a document
+     */
+    public function checkDownloadStatus() {
+        $documentId = (int)($_GET['document_id'] ?? 0);
+        $userId = $this->getCurrentUserId();
+        
+        if ($documentId <= 0) {
+            $this->json(['success' => false, 'has_pending' => false, 'has_approved' => false]);
+            return;
+        }
+        
+        // Check for pending request
+        $hasPending = $this->downloadRequestModel->hasPendingRequest($documentId, $userId);
+        
+        // Check for active approved request
+        $hasApproved = $this->downloadRequestModel->hasActiveApprovedRequest($documentId, $userId);
+        
+        $downloadUrl = null;
+        if ($hasApproved) {
+            // Get the download token
+            try {
+                $request = $this->db->fetch(
+                    "SELECT download_token FROM download_requests 
+                     WHERE document_id = ? AND requested_by = ? AND status = 'approved' 
+                     AND download_token IS NOT NULL 
+                     AND (token_expires_at IS NULL OR token_expires_at > NOW())
+                     ORDER BY approved_at DESC LIMIT 1",
+                    [$documentId, $userId]
+                );
+                if ($request && !empty($request['download_token'])) {
+                    $downloadUrl = BASE_URL . '/document/download/' . $request['download_token'];
+                }
+            } catch (Exception $e) {
+                // Ignore
+            }
+        }
+        
+        $this->json([
+            'success' => true,
+            'has_pending' => $hasPending,
+            'has_approved' => $hasApproved,
+            'download_url' => $downloadUrl
+        ]);
+    }
 
     private function autoLinkDriveFileToRepositoryDocument($documentFileId) {
         $documentFileId = (int)$documentFileId;
